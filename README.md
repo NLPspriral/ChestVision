@@ -136,9 +136,3 @@ ChestVision/
 
 - 西安交通大学 · 胸片X光多智能体分析系统小组
 
-
-
-```
-  lianjie@deepwise.com
-```
-
