@@ -64,6 +64,7 @@
         ref="fileInputRef"
         type="file"
         accept="image/*,.zip"
+        multiple
         style="display: none"
         @change="onFileSelect"
       />
@@ -77,7 +78,7 @@
         v-if="!agentStore.isLoading"
         type="primary"
         @click="sendMsg"
-        :disabled="!inputText.trim() && !selectedFile"
+        :disabled="!inputText.trim() && !selectedFiles.length"
         >发送</el-button
       >
       <el-button v-else type="danger" @click="stopChat">停止</el-button>
@@ -97,7 +98,7 @@ import { nextTick, onMounted, ref } from "vue";
 
 const agentStore = useAgentStore();
 const inputText = ref("");
-const selectedFile = ref(null);
+const selectedFiles = ref([]);
 const msgListRef = ref(null);
 const fileInputRef = ref(null);
 
@@ -112,10 +113,14 @@ function triggerFile() {
   fileInputRef.value?.click();
 }
 function onFileSelect(e) {
-  const f = e.target.files[0];
-  if (f) {
-    selectedFile.value = f;
-    ElMessage.info(`${f.name} 已选择`);
+  const files = Array.from(e.target.files);
+  if (files.length) {
+    selectedFiles.value = files;
+    ElMessage.info(
+      files.length === 1
+        ? `${files[0].name} 已选择`
+        : `${files.length} 个文件已选择`,
+    );
   }
 }
 
@@ -125,50 +130,61 @@ function renderMd(text) {
 
 async function sendMsg() {
   const text = inputText.value.trim();
-  const file = selectedFile.value;
-  if (!text && !file) return;
+  const files = selectedFiles.value;
+  if (!text && !files.length) return;
 
   // 用户消息
   agentStore.addMessage({
     role: "user",
-    content: text || "[图片检测]",
-    image: file?.name,
-    imagePreview: file ? URL.createObjectURL(file) : null,
+    content:
+      text || (files.length > 1 ? `[${files.length}张胸片]` : "[图片检测]"),
+    image: files.length === 1 ? files[0].name : null,
+    imagePreview: files.length === 1 ? URL.createObjectURL(files[0]) : null,
+    images: files.length > 1 ? files.map((f) => URL.createObjectURL(f)) : null,
   });
   inputText.value = "";
-  selectedFile.value = null;
+  selectedFiles.value = [];
 
   // AI 加载占位
   agentStore.addMessage({ role: "assistant", content: "", loading: true });
   scrollBottom();
 
-  // 上传文件
-  let serverPath = null;
-  if (file) {
+  // 上传所有文件
+  const paths = [];
+  for (const f of files) {
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", f);
       const up = await request.post("/chat/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 60000,
       });
-      serverPath = up.image_path;
+      paths.push(up.image_path);
     } catch (e) {
       const last = agentStore.messages[agentStore.messages.length - 1];
-      last.content = `上传失败：${e.response?.data?.detail || e.message}`;
+      last.content = `${f.name} 上传失败：${e.response?.data?.detail || e.message}`;
       last.loading = false;
       return;
     }
+  }
+
+  // SSE — 多文件时注入所有路径
+  let enhancedMsg =
+    text ||
+    (files.length > 1
+      ? `请批量检测这${files.length}张胸片`
+      : "请帮我分析这张胸片");
+  if (paths.length === 1) {
+    enhancedMsg += `\n[附件图片路径: ${paths[0]}]`;
+  } else if (paths.length > 1) {
+    enhancedMsg += `\n[附件图片路径: ${paths.join(", ")}]`;
   }
 
   // SSE 流式对话
   let fullContent = "";
   const stop = streamChat(
     "/api/chat/stream",
-    {
-      message: text || "请帮我分析这张胸片",
-      ...(serverPath ? { image_path: serverPath } : {}),
-    },
+    { message: enhancedMsg, image_path: paths[0] || undefined },
     {
       onMessage: (data) => {
         if (data.type === "text_chunk") {

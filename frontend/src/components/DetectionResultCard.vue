@@ -3,19 +3,32 @@
     <div class="card-header">
       <el-icon><DataAnalysis /></el-icon>
       <span>检测结果</span>
-      <el-tag size="small" type="success">
-        {{ result.total_objects ?? 0 }} 个病灶
-      </el-tag>
+      <el-tag size="small" type="success"
+        >{{ result.total_objects ?? 0 }} 个病灶</el-tag
+      >
     </div>
 
     <div class="card-body">
       <!-- 单图标注图 -->
-      <div class="result-image" v-if="annotatedImageSrc">
+      <div class="result-image" v-if="annotatedImageSrc && !isBatch">
         <img
           :src="annotatedImageSrc"
           alt="检测标注图"
-          @click="showFullImage = true"
+          @click="previewImage(annotatedImageSrc)"
         />
+      </div>
+
+      <!-- 批量标注图网格 -->
+      <div class="result-images-grid" v-if="isBatch && batchImages.length > 0">
+        <div
+          v-for="(img, i) in batchImages"
+          :key="i"
+          class="grid-image"
+          @click="previewImage(img.src)"
+        >
+          <img :src="img.src" :alt="img.name" />
+          <span class="image-name">{{ img.name }}</span>
+        </div>
       </div>
 
       <!-- 统计信息 -->
@@ -51,11 +64,7 @@
 
     <!-- 全屏预览 -->
     <el-dialog v-model="showFullImage" title="检测标注图" width="80%">
-      <img
-        v-if="annotatedImageSrc"
-        :src="annotatedImageSrc"
-        style="width: 100%"
-      />
+      <img v-if="previewSrc" :src="previewSrc" style="width: 100%" />
     </el-dialog>
   </div>
 </template>
@@ -66,14 +75,34 @@ import { computed, ref } from "vue";
 
 const props = defineProps({ result: { type: Object, required: true } });
 const showFullImage = ref(false);
+const previewSrc = ref("");
 
 const annotatedImageSrc = computed(() => {
   if (props.result.annotated_image_base64)
     return `data:image/jpeg;base64,${props.result.annotated_image_base64}`;
-  if (props.result.annotated_image_path)
-    return `/api/detection/image?path=${encodeURIComponent(props.result.annotated_image_path)}`;
   return null;
 });
+
+const isBatch = computed(
+  () =>
+    Array.isArray(props.result.annotated_images) &&
+    props.result.annotated_images.length > 0,
+);
+
+const batchImages = computed(() => {
+  if (!isBatch.value) return [];
+  return props.result.annotated_images.map((img) => ({
+    name: img.image_path || "image",
+    src: img.annotated_image_base64
+      ? `data:image/jpeg;base64,${img.annotated_image_base64}`
+      : "",
+  }));
+});
+
+function previewImage(src) {
+  previewSrc.value = typeof src === "string" ? src : src;
+  showFullImage.value = true;
+}
 
 const classCountsArray = computed(() => {
   const counts = props.result.class_counts || {};
@@ -112,6 +141,28 @@ const classCountsArray = computed(() => {
     object-fit: contain;
     border-radius: 4px;
     cursor: pointer;
+  }
+}
+.result-images-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.grid-image {
+  text-align: center;
+  cursor: pointer;
+  img {
+    width: 100%;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+  .image-name {
+    font-size: 11px;
+    color: #909399;
   }
 }
 .result-stats {
