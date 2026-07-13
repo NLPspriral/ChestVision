@@ -5,38 +5,63 @@
       <div
         v-for="(msg, i) in agentStore.messages"
         :key="i"
-        :class="['message-item', `message-${msg.role}`]"
+        :class="['message-row', `msg-${msg.role}`]"
       >
-        <!-- 用户消息 -->
-        <div v-if="msg.role === 'user'" class="message-bubble user-bubble">
-          <div class="message-content">{{ msg.content }}</div>
-          <div v-if="msg.image" class="msg-attachment">
-            <img :src="msg.imagePreview" alt="附件" />
-          </div>
+        <!-- AI 头像 -->
+        <div class="msg-avatar" v-if="msg.role === 'assistant'">
+          <span class="avatar-bot">🫁</span>
         </div>
 
-        <!-- AI 消息 -->
-        <div
-          v-else-if="msg.role === 'assistant'"
-          class="message-bubble assistant-bubble"
-        >
-          <div v-if="msg.loading" class="typing-indicator">
-            <span></span><span></span><span></span>
+        <div class="msg-body">
+          <!-- 发送者名称 + 时间 -->
+          <div class="msg-meta">
+            <span class="msg-sender">{{
+              msg.role === "user" ? "我" : "ChestVision AI"
+            }}</span>
           </div>
+
+          <!-- 消息气泡 -->
           <div
-            v-else
-            class="message-content markdown-body"
-            v-html="renderMd(msg.content)"
-          ></div>
-          <DetectionResultCard
-            v-if="msg.detectionResult"
-            :result="msg.detectionResult"
-          />
+            :class="[
+              'message-bubble',
+              msg.role === 'user' ? 'user-bubble' : 'assistant-bubble',
+            ]"
+          >
+            <div v-if="msg.role === 'user'" class="message-content">
+              {{ msg.content }}
+            </div>
+            <div v-if="msg.image" class="msg-attachment">
+              <img :src="msg.imagePreview" alt="附件" />
+            </div>
+
+            <div
+              v-if="msg.role === 'assistant' && msg.loading"
+              class="typing-indicator"
+            >
+              <span></span><span></span><span></span>
+            </div>
+            <div
+              v-else-if="msg.role === 'assistant'"
+              class="message-content markdown-body"
+              v-html="renderMd(msg.content)"
+            ></div>
+            <DetectionResultCard
+              v-if="msg.detectionResult"
+              :result="msg.detectionResult"
+            />
+          </div>
+
+          <!-- 工具调用 -->
+          <div v-if="msg.toolCall" class="tool-call-info">
+            <el-tag size="small" type="info" effect="plain"
+              >🔧 {{ msg.toolCall.tool }}</el-tag
+            >
+          </div>
         </div>
 
-        <!-- 工具调用提示 -->
-        <div v-if="msg.toolCall" class="tool-call-info">
-          <el-tag size="small" type="info">🔧 {{ msg.toolCall.tool }}</el-tag>
+        <!-- 用户头像 -->
+        <div class="msg-avatar" v-if="msg.role === 'user'">
+          <el-avatar :size="32">{{ userStore.username?.charAt(0) }}</el-avatar>
         </div>
       </div>
     </div>
@@ -90,6 +115,7 @@
 import { detectBatch, detectSingle, detectZip } from "@/api/detection";
 import DetectionResultCard from "@/components/DetectionResultCard.vue";
 import { useAgentStore } from "@/stores/agent";
+import { useUserStore } from "@/stores/user";
 import { renderMarkdown } from "@/utils/markdown";
 import request from "@/utils/request";
 import { streamChat } from "@/utils/stream";
@@ -97,6 +123,7 @@ import { ElMessage } from "element-plus";
 import { nextTick, onMounted, ref } from "vue";
 
 const agentStore = useAgentStore();
+const userStore = useUserStore();
 const inputText = ref("");
 const selectedFiles = ref([]);
 const msgListRef = ref(null);
@@ -306,37 +333,63 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #f5f5f5;
+  background: $bg-color;
 }
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 20px 24px;
 }
-.message-item {
+
+.message-row {
   display: flex;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 24px;
+  animation: msgIn 0.3s ease;
+  &.msg-user {
+    flex-direction: row-reverse;
+  }
 }
-.message-user {
-  justify-content: flex-end;
+.msg-avatar {
+  flex-shrink: 0;
+  .avatar-bot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
+    background: linear-gradient(135deg, #e6f7f5, #c8f0e8);
+    border-radius: 10px;
+  }
 }
-.message-assistant {
-  justify-content: flex-start;
+.msg-body {
+  max-width: 72%;
 }
+.msg-meta {
+  margin-bottom: 4px;
+  .msg-sender {
+    font-size: 12px;
+    color: $text-secondary;
+    font-weight: 500;
+  }
+}
+.msg-user .msg-meta {
+  text-align: right;
+}
+
 .message-bubble {
-  max-width: 78%;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-radius: $border-radius-md;
   line-height: 1.65;
-  word-break: break-word;
   font-size: 14px;
-  animation: msgIn 0.3s ease;
+  word-break: break-word;
 }
 .user-bubble {
   background: linear-gradient(135deg, $primary-color, $primary-light);
   color: #fff;
   border-bottom-right-radius: $spacing-xs;
-  box-shadow: 0 2px 8px rgba($primary-color, 0.25);
+  box-shadow: 0 2px 8px rgba($primary-color, 0.2);
 }
 .assistant-bubble {
   background: $bg-white;
@@ -350,18 +403,19 @@ onMounted(() => {
 .msg-attachment {
   margin-top: 8px;
   img {
-    max-width: 200px;
-    border-radius: 8px;
-    border: 1px solid #e0e0e0;
+    max-width: 220px;
+    border-radius: $border-radius-sm;
   }
 }
+
 .typing-indicator {
   display: flex;
-  gap: 4px;
+  gap: 5px;
+  padding: 6px 0;
   span {
-    width: 6px;
-    height: 6px;
-    background: #999;
+    width: 7px;
+    height: 7px;
+    background: #bfbfbf;
     border-radius: 50%;
     animation: typing 1.2s infinite;
   }
@@ -375,14 +429,14 @@ onMounted(() => {
 .quick-actions {
   display: flex;
   gap: 8px;
-  padding: 12px 20px;
+  padding: 12px 24px;
   border-top: 1px solid #eceff4;
   background: $bg-white;
 }
 .input-area {
   display: flex;
   gap: 8px;
-  padding: 12px 20px;
+  padding: 12px 24px;
   border-top: 1px solid #eceff4;
   background: $bg-white;
   .el-input {
@@ -390,13 +444,9 @@ onMounted(() => {
   }
 }
 .tool-call-info {
-  margin-top: 8px;
-  padding: 4px 8px;
-  background: #f5f5f5;
-  border-radius: 4px;
-  font-size: 12px;
-  color: $text-secondary;
+  margin-top: 6px;
 }
+
 @keyframes typing {
   0%,
   60%,

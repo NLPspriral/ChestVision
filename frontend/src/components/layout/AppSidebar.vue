@@ -1,12 +1,19 @@
 <template>
-  <aside class="app-sidebar">
+  <aside class="app-sidebar" :class="{ collapsed }">
+    <!-- Logo 区域 -->
+    <div class="sidebar-logo" @click="$router.push('/')">
+      <span class="logo-icon">🫁</span>
+      <span v-show="!collapsed" class="logo-text">ChestVision</span>
+    </div>
+
+    <!-- 导航菜单 -->
     <el-menu
       :default-active="activeMenu"
       :router="true"
       :collapse="collapsed"
-      background-color="#FFFFFF"
+      background-color="transparent"
       text-color="#595959"
-      active-text-color="#{$primary-color}"
+      active-text-color="#2A9D8F"
     >
       <el-menu-item
         v-for="item in menuItems"
@@ -17,10 +24,24 @@
         <span>{{ item.title }}</span>
       </el-menu-item>
     </el-menu>
+
+    <!-- 底部：折叠按钮 + 用户区 -->
+    <div class="sidebar-footer">
+      <div class="collapse-btn" @click="collapsed = !collapsed">
+        <el-icon
+          ><component :is="collapsed ? 'DArrowRight' : 'DArrowLeft'"
+        /></el-icon>
+      </div>
+      <div class="sidebar-user" v-if="!collapsed">
+        <el-avatar :size="28">{{ userStore.username?.charAt(0) }}</el-avatar>
+        <span class="user-name">{{ userStore.username }}</span>
+      </div>
+    </div>
   </aside>
 </template>
 
 <script setup>
+import { useUserStore } from "@/stores/user";
 import {
   Camera,
   ChatDotRound,
@@ -32,6 +53,7 @@ import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 
 const route = useRoute();
+const userStore = useUserStore();
 const collapsed = ref(false);
 
 const activeMenu = computed(() => "/" + route.path.split("/")[1]);
@@ -51,30 +73,92 @@ const menuItems = [
   height: 100%;
   background: $sidebar-bg;
   border-right: 1px solid #eceff4;
-  overflow-y: auto;
-
-  .el-menu {
-    border-right: none;
-    height: 100%;
-    padding: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.25s ease;
+  &.collapsed {
+    width: $sidebar-collapsed-width;
   }
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  .logo-icon {
+    font-size: 28px;
+  }
+  .logo-text {
+    font-size: 16px;
+    font-weight: 800;
+    color: $text-primary;
+    letter-spacing: -0.5px;
+  }
+}
+
+.el-menu {
+  flex: 1;
+  border-right: none !important;
+  padding: 8px;
 
   .el-menu-item {
-    height: 44px;
-    line-height: 44px;
+    height: 42px;
+    line-height: 42px;
     margin: 2px 0;
     border-radius: $border-radius-sm;
-    font-size: 14px;
+    font-size: 13px;
+    transition: all 0.2s;
 
     &.is-active {
-      background-color: $sidebar-active-bg !important;
-      color: $sidebar-active-text !important;
+      background: linear-gradient(135deg, #e6f7f5, #f0faf8) !important;
+      color: $primary-color !important;
       font-weight: 600;
+      box-shadow: inset 3px 0 0 $primary-color;
     }
-
     &:hover {
-      background-color: #f5f7fa !important;
+      background: #f5f7fa !important;
     }
+  }
+}
+
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border-radius: $border-radius-sm;
+  cursor: pointer;
+  color: $text-secondary;
+  transition: all 0.2s;
+  &:hover {
+    background: #f5f7fa;
+    color: $primary-color;
+  }
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+  .user-name {
+    font-size: 13px;
+    color: $text-regular;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>
