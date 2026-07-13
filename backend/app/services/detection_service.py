@@ -307,6 +307,7 @@ class DetectionService:
     def detect_batch(cls, image_paths: list, conf: float = 0.25) -> dict:
         """批量检测多张胸片（供 Agent Tool 和快捷 API 调用）"""
         all_detections = []
+        annotated_images = []
         total_objects = 0
         total_time = 0
         class_counts = {}
@@ -316,6 +317,19 @@ class DetectionService:
                 r = cls.predict(path, conf_threshold=conf)
                 total_objects += r["total_objects"]
                 total_time += r["inference_time"]
+                # 读取标注图 base64
+                img_b64 = ""
+                if r.get("annotated_image_path") and os.path.exists(
+                    r["annotated_image_path"]
+                ):
+                    with open(r["annotated_image_path"], "rb") as f:
+                        img_b64 = base64.b64encode(f.read()).decode("utf-8")
+                annotated_images.append(
+                    {
+                        "image_path": os.path.basename(path),
+                        "annotated_image_base64": img_b64,
+                    }
+                )
                 for obj in r["objects"]:
                     cn = obj.get("class_name_cn", obj["class_name"])
                     class_counts[cn] = class_counts.get(cn, 0) + 1
@@ -330,6 +344,7 @@ class DetectionService:
             "class_counts": class_counts,
             "total_inference_time": round(total_time, 2),
             "detections": all_detections,
+            "annotated_images": annotated_images,
         }
 
     @classmethod
