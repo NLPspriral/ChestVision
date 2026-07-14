@@ -11,6 +11,7 @@
   - GET  /api/detection/task/{id} 检测任务详情
 """
 
+import base64
 import os
 import tempfile
 import uuid
@@ -125,6 +126,47 @@ async def detect(
             patient_profile_id=patient_profile_id,
         )
 
+        # ── LLM 病史感知分析（v3.0 P1）──
+        analysis = None
+        if patient_profile_id:
+            try:
+                analysis = detection_service.analyze_with_history(
+                    db=db,
+                    patient_profile_id=patient_profile_id,
+                    current_result={
+                        "total_objects": result["total_objects"],
+                        "class_counts": {
+                            obj["class_name_cn"]: sum(
+                                1
+                                for o in result["objects"]
+                                if o["class_name_cn"] == obj["class_name_cn"]
+                            )
+                            for obj in result["objects"]
+                        },
+                        "detections": result["objects"],
+                    },
+                )
+                if analysis.get("analysis_report"):
+                    task.analysis_report = analysis["analysis_report"]
+                    task.risk_level = analysis["risk_level"]
+                    task.referenced_record_ids = analysis["referenced_record_ids"]
+                    db.commit()
+                    logger.info(
+                        "病史感知分析已保存: task_id=%d, risk=%s",
+                        task.id,
+                        analysis["risk_level"],
+                    )
+            except Exception as e:
+                logger.error("病史分析异常: %s", str(e))
+
+        # ── 读取标注图 base64 ──
+        annotated_base64 = ""
+        if result.get("annotated_image_path") and os.path.exists(
+            result["annotated_image_path"]
+        ):
+            with open(result["annotated_image_path"], "rb") as f:
+                annotated_base64 = base64.b64encode(f.read()).decode("utf-8")
+
         # ── 返回结果 ──
         return {
             "task_id": task.id,
@@ -134,6 +176,13 @@ async def detect(
             "image_size": f"{result['image_width']}×{result['image_height']}",
             "objects": result["objects"],
             "annotated_image_url": f"/api/detection/image/{task.id}",
+            "annotated_image_base64": annotated_base64,
+            "ai_analysis": {
+                "report": analysis.get("analysis_report") if analysis else None,
+                "risk_level": analysis.get("risk_level") if analysis else None,
+            }
+            if analysis
+            else None,
         }
 
     finally:
@@ -177,15 +226,22 @@ async def get_annotated_image(
 async def list_detection_tasks(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前用户的检测历史列表"""
-    query = (
-        db.query(DetectionTask)
-        .filter(DetectionTask.user_id == current_user.id)
-        .order_by(DetectionTask.created_at.desc())
-    )
+    """获取当前用户的检测历史列表，支持按日期筛选"""
+    from datetime import datetime as dt
+
+    query = db.query(DetectionTask).filter(DetectionTask.user_id == current_user.id)
+    if start_date:
+        query = query.filter(DetectionTask.created_at >= dt.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(
+            DetectionTask.created_at <= dt.fromisoformat(end_date + "T23:59:59")
+        )
+    query = query.order_by(DetectionTask.created_at.desc())
     total = query.count()
     tasks = query.offset((page - 1) * page_size).limit(page_size).all()
 
@@ -262,7 +318,7 @@ async def get_detection_task_detail(
 
 
 # ═══════════════════════════════════════════════════
-# Day 8 新增：快捷检测接口（跳过 DB，供 Agent 和快捷按钮调用）
+# 快捷检测接口（v3.0 改为入库）
 # ═══════════════════════════════════════════════════
 
 
@@ -270,9 +326,10 @@ async def get_detection_task_detail(
 async def detect_single_shortcut(
     file: UploadFile = File(...),
     conf: float = Form(0.25),
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """快捷单图检测（跳过 LLM + DB，直接返回检测结果）"""
+    """快捷单图检测（入库 + 返回结果）"""
     suffix = os.path.splitext(file.filename or "image.png")[1] or ".png"
     tmp_path = os.path.join(
         tempfile.gettempdir(), f"chestx_{uuid.uuid4().hex[:8]}{suffix}"
@@ -283,6 +340,11 @@ async def detect_single_shortcut(
             f.write(content)
         result = detection_service.detect_single(tmp_path, conf=conf)
         result["filename"] = file.filename
+
+        # 入库
+        _save_detection_to_db(
+            db, current_user, file.filename or "single", result, "single"
+        )
         return result
     finally:
         try:
@@ -295,9 +357,10 @@ async def detect_single_shortcut(
 async def detect_batch_shortcut(
     files: list[UploadFile] = File(...),
     conf: float = Form(0.25),
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """快捷批量检测（多图或 ZIP）"""
+    """快捷批量检测（入库 + 返回结果）"""
     temp_paths = []
     try:
         for file in files:
@@ -311,6 +374,12 @@ async def detect_batch_shortcut(
             temp_paths.append(tmp)
 
         result = detection_service.detect_batch(temp_paths, conf=conf)
+
+        # 入库
+        filename_list = [f.filename or "batch" for f in files]
+        _save_detection_to_db(
+            db, current_user, ", ".join(filename_list), result, "batch"
+        )
         return result
     finally:
         for p in temp_paths:
@@ -324,9 +393,10 @@ async def detect_batch_shortcut(
 async def detect_zip_shortcut(
     file: UploadFile = File(...),
     conf: float = Form(0.25),
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """快捷 ZIP 检测：解压 ZIP 并批量检测其中所有胸片"""
+    """快捷 ZIP 检测（入库 + 返回结果）"""
     tmp_path = os.path.join(
         tempfile.gettempdir(), f"chestx_zip_{uuid.uuid4().hex[:8]}.zip"
     )
@@ -335,7 +405,79 @@ async def detect_zip_shortcut(
         with open(tmp_path, "wb") as f:
             f.write(content)
         result = detection_service.detect_zip(tmp_path, conf=conf)
+
+        # 入库
+        _save_detection_to_db(db, current_user, file.filename or "zip", result, "zip")
         return result
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+def _save_detection_to_db(db, current_user, image_path, result, task_type):
+    """快捷检测入库辅助函数，适配 detect_single/batch/zip 返回格式"""
+    from app.entity.db_models import DetectionScene, ModelVersion, PatientProfile
+
+    try:
+        scene = (
+            db.query(DetectionScene).filter(DetectionScene.name == "chest_xray").first()
+        )
+        if not scene:
+            logger.warning("检测场景不存在，跳过入库")
+            return
+
+        model_version = (
+            db.query(ModelVersion)
+            .filter(ModelVersion.scene_id == scene.id)
+            .order_by(ModelVersion.created_at.desc())
+            .first()
+        )
+
+        patient_profile_id = None
+        if current_user.user_type == "patient":
+            profile = (
+                db.query(PatientProfile)
+                .filter(PatientProfile.user_id == current_user.id)
+                .first()
+            )
+            if profile:
+                patient_profile_id = profile.id
+
+        # 适配 detect_single 返回格式（detections）→ predict 格式（objects）
+        predict_result = {
+            "total_objects": result.get("total_objects", 0),
+            "inference_time": result.get("inference_time", 0),
+            "image_width": 0,
+            "image_height": 0,
+            "objects": [
+                {
+                    "class_name": d.get("class_name", ""),
+                    "class_name_cn": d.get("class_name_cn", ""),
+                    "class_id": d.get("class_id", 0),
+                    "confidence": d.get("confidence", 0),
+                    "bbox": d.get("bbox", []),
+                }
+                for d in result.get("detections", [])
+            ],
+        }
+        # 如果是 batch/zip，可能有 annotated_image_path
+        if result.get("annotated_image_path"):
+            predict_result["annotated_image_path"] = result["annotated_image_path"]
+
+        detection_service.save_detection_task(
+            db=db,
+            user_id=current_user.id,
+            scene_id=scene.id,
+            model_version_id=model_version.id if model_version else None,
+            image_path=image_path,
+            predict_result=predict_result,
+            task_type=task_type,
+            patient_profile_id=patient_profile_id,
+        )
+    except Exception as e:
+        logger.error("快捷检测入库失败: %s", str(e))
     finally:
         try:
             os.remove(tmp_path)

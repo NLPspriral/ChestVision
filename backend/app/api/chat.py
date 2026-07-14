@@ -66,10 +66,71 @@ async def chat_stream(
 
     logger.info("用户 %s 发起对话: %s", current_user.username, message[:50])
 
+    # ── 注入患者病史上下文 ──
+    enhanced_message = message
+    try:
+        from app.database.session import SessionLocal
+        from app.entity.db_models import DetectionTask, MedicalRecord, PatientProfile
+
+        db = SessionLocal()
+        try:
+            if current_user.user_type == "patient":
+                profile = (
+                    db.query(PatientProfile)
+                    .filter(PatientProfile.user_id == current_user.id)
+                    .first()
+                )
+                if profile:
+                    # 拉取最近病例
+                    records = (
+                        db.query(MedicalRecord)
+                        .filter(MedicalRecord.patient_profile_id == profile.id)
+                        .order_by(MedicalRecord.visit_date.desc().nullslast())
+                        .limit(3)
+                        .all()
+                    )
+                    # 拉取最近检测
+                    tasks = (
+                        db.query(DetectionTask)
+                        .filter(
+                            DetectionTask.patient_profile_id == profile.id,
+                            DetectionTask.status == "completed",
+                        )
+                        .order_by(DetectionTask.created_at.desc())
+                        .limit(3)
+                        .all()
+                    )
+
+                    if records or tasks:
+                        ctx_parts = [
+                            "[系统上下文：以下是该患者的历史信息，请在回答时参考]\n"
+                        ]
+                        if records:
+                            ctx_parts.append("## 患者历史病例")
+                            for r in records:
+                                ctx_parts.append(
+                                    f"- {r.record_type} ({r.visit_date}): "
+                                    f"主诉={r.chief_complaint or '无'}, "
+                                    f"诊断={r.diagnosis or '无'}"
+                                )
+                        if tasks:
+                            ctx_parts.append("\n## 历史检测结果")
+                            for t in tasks:
+                                ctx_parts.append(
+                                    f"- 检测ID={t.id} ({t.created_at}): "
+                                    f"检出{t.total_objects}个病灶, "
+                                    f"风险={t.risk_level or '未评估'}"
+                                )
+                        enhanced_message = "\n".join(ctx_parts) + "\n\n" + message
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("注入病史上下文失败: %s", str(e))
+
     async def event_generator():
         try:
             async for event in detection_agent.chat_stream(
-                message=message, image_path=image_path
+                message=enhanced_message, image_path=image_path
             ):
                 event_data = json.dumps(event, ensure_ascii=False)
                 yield f"data: {event_data}\n\n"

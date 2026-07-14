@@ -20,7 +20,12 @@ import numpy as np
 from app.config.settings import settings
 from app.core.logger import get_logger
 from app.database.session import SessionLocal
-from app.entity.db_models import DetectionResult, DetectionTask
+from app.entity.db_models import (
+    DetectionResult,
+    DetectionTask,
+    MedicalRecord,
+    PatientProfile,
+)
 from sqlalchemy.orm import Session
 from ultralytics import YOLO
 
@@ -276,6 +281,172 @@ class DetectionService:
             predict_result["total_objects"],
         )
         return task
+
+    @classmethod
+    def analyze_with_history(
+        cls,
+        db: Session,
+        patient_profile_id: int,
+        current_result: dict,
+    ) -> dict:
+        """LLM 病史感知分析：综合历史病例 + 历史检测 + 当前结果"""
+        # 1. 拉取历史病例（最近5条）
+        records = (
+            db.query(MedicalRecord)
+            .filter(
+                MedicalRecord.patient_profile_id == patient_profile_id,
+                MedicalRecord.record_status.in_(["completed", "reviewed"]),
+            )
+            .order_by(MedicalRecord.visit_date.desc().nullslast())
+            .limit(5)
+            .all()
+        )
+
+        # 2. 拉取历史检测（最近5次，排除当前任务）
+        past_tasks = (
+            db.query(DetectionTask)
+            .filter(
+                DetectionTask.patient_profile_id == patient_profile_id,
+                DetectionTask.status == "completed",
+                DetectionTask.analysis_report.isnot(None),
+            )
+            .order_by(DetectionTask.created_at.desc())
+            .limit(5)
+            .all()
+        )
+
+        # 3. 构建 LLM prompt
+        prompt_parts = [
+            "你是一名资深放射科医生，请根据以下信息对胸部X光检测结果进行综合分析。\n"
+        ]
+
+        # 患者病史
+        if records:
+            prompt_parts.append("## 患者历史病例")
+            for i, r in enumerate(records, 1):
+                prompt_parts.append(f"### 病例{i} ({r.record_type} | {r.visit_date})")
+                if r.chief_complaint:
+                    prompt_parts.append(f"主诉：{r.chief_complaint}")
+                if r.present_illness:
+                    prompt_parts.append(f"现病史：{r.present_illness}")
+                if r.past_history:
+                    prompt_parts.append(f"既往史：{r.past_history}")
+                if r.diagnosis:
+                    diag_text = ", ".join(
+                        d.get("name", "") for d in (r.diagnosis or [])
+                    )
+                    if diag_text:
+                        prompt_parts.append(f"诊断：{diag_text}")
+                prompt_parts.append("")
+        else:
+            prompt_parts.append("（患者无历史病例记录）\n")
+
+        # 历史检测
+        if past_tasks:
+            prompt_parts.append("## 历史检测结果")
+            for i, t in enumerate(past_tasks, 1):
+                prompt_parts.append(
+                    f"检测{i} ({t.created_at})：发现{t.total_objects}个病灶"
+                )
+                if t.risk_level:
+                    prompt_parts.append(f"  风险等级：{t.risk_level}")
+                if t.analysis_report:
+                    # 取摘要（前200字）
+                    summary = t.analysis_report[:200].replace("\n", " ")
+                    prompt_parts.append(f"  摘要：{summary}...")
+                prompt_parts.append("")
+        else:
+            prompt_parts.append("（患者无历史检测记录）\n")
+
+        # 当前检测结果
+        prompt_parts.append("## 本次检测结果")
+        prompt_parts.append(f"检出病灶总数：{current_result.get('total_objects', 0)}")
+        if current_result.get("class_counts"):
+            for cn, cnt in current_result["class_counts"].items():
+                prompt_parts.append(f"  - {cn}：{cnt}个")
+        if current_result.get("detections"):
+            prompt_parts.append("\n病灶详情：")
+            for d in current_result["detections"]:
+                cn = d.get("class_name_cn", d.get("class_name", ""))
+                conf = d.get("confidence", 0)
+                bbox = d.get("bbox", [])
+                prompt_parts.append(f"  - {cn}（置信度{conf:.1%}，位置{bbox}）")
+
+        prompt_parts.append("""
+## 请输出以下格式的分析报告：
+
+### 1. 总体评估
+（简要总结本次检测发现，结合历史对比变化）
+
+### 2. 风险评级
+从以下选择一个：low（低风险）/ medium（中风险）/ high（高风险）/ critical（危急）
+
+### 3. 鉴别诊断
+（列出可能的诊断方向）
+
+### 4. 随访建议
+（给出具体的随访或进一步检查建议）
+
+请用中文回答，保持专业但易懂。""")
+
+        prompt = "\n".join(prompt_parts)
+
+        # 4. 调用 LLM
+        try:
+            from app.config.settings import settings as s
+            from langchain_openai import ChatOpenAI
+
+            qwen_key = getattr(s, "QWEN_API_KEY", "")
+            if qwen_key and qwen_key not in ("sk-your-qwen-api-key", ""):
+                api_key = qwen_key
+                base_url = getattr(s, "QWEN_BASE_URL", "")
+                model = getattr(s, "QWEN_MODEL", "qwen-plus")
+            else:
+                api_key = getattr(s, "OPENAI_API_KEY", "")
+                base_url = getattr(s, "OPENAI_BASE_URL", "")
+                model = getattr(s, "OPENAI_MODEL", "gpt-4o-mini")
+
+            if not api_key:
+                logger.warning("未配置 LLM API Key，跳过病史分析")
+                return {"analysis_report": None, "risk_level": None, "suggestion": None}
+
+            llm = ChatOpenAI(
+                model=model,
+                api_key=api_key,  # type: ignore[arg-type]
+                base_url=base_url,
+                temperature=0.3,
+            )
+            response = llm.invoke(prompt)
+            analysis_text = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            # 5. 提取风险等级
+            risk_level = "medium"
+            if "critical" in analysis_text.lower() or "危急" in analysis_text:
+                risk_level = "critical"
+            elif "high" in analysis_text.lower() or "高风险" in analysis_text:
+                risk_level = "high"
+            elif "low" in analysis_text.lower() or "低风险" in analysis_text:
+                risk_level = "low"
+
+            # 6. 提取引用记录ID
+            referenced_ids = [r.id for r in records] + [t.id for t in past_tasks]
+
+            logger.info("病史感知分析完成，风险等级：%s", risk_level)
+            return {
+                "analysis_report": analysis_text,
+                "risk_level": risk_level,
+                "referenced_record_ids": referenced_ids,
+            }
+
+        except Exception as e:
+            logger.error("LLM 病史分析失败: %s", str(e))
+            return {
+                "analysis_report": f"AI 分析暂时不可用：{str(e)}",
+                "risk_level": "medium",
+                "referenced_record_ids": [],
+            }
 
     @classmethod
     def detect_single(

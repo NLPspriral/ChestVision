@@ -121,6 +121,13 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="状态" v-if="editingRecord">
+          <el-radio-group v-model="form.record_status">
+            <el-radio value="draft">草稿</el-radio>
+            <el-radio value="completed">已完成</el-radio>
+            <el-radio value="reviewed">已审核</el-radio>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="主诉">
           <el-input
             v-model="form.chief_complaint"
@@ -263,6 +270,7 @@ const loadingPatients = ref(false);
 const form = ref({
   patient_profile_id: null,
   record_type: "outpatient",
+  record_status: "draft",
   chief_complaint: "",
   present_illness: "",
   past_history: "",
@@ -332,6 +340,7 @@ function showCreateDialog() {
   form.value = {
     patient_profile_id: filterPatientId.value || null,
     record_type: "outpatient",
+    record_status: "draft",
     chief_complaint: "",
     present_illness: "",
     past_history: "",
@@ -351,6 +360,7 @@ function showEditDialog(row) {
     form.value = {
       patient_profile_id: data.patient_profile_id,
       record_type: data.record_type || "outpatient",
+      record_status: data.record_status || "draft",
       chief_complaint: data.chief_complaint || "",
       present_illness: data.present_illness || "",
       past_history: data.past_history || "",

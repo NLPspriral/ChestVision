@@ -158,6 +158,30 @@
             </el-table>
           </el-card>
 
+          <!-- AI 病史感知分析（v3.0）-->
+          <el-card
+            v-if="detectResult.ai_analysis?.report"
+            shadow="hover"
+            class="analysis-card"
+          >
+            <template #header>
+              <div class="analysis-header">
+                <span>🤖 AI 综合分析</span>
+                <el-tag
+                  v-if="detectResult.ai_analysis.risk_level"
+                  :type="riskTagType(detectResult.ai_analysis.risk_level)"
+                  size="small"
+                >
+                  {{ riskLabel(detectResult.ai_analysis.risk_level) }}
+                </el-tag>
+              </div>
+            </template>
+            <div
+              class="analysis-content"
+              v-html="renderMarkdown(detectResult.ai_analysis.report)"
+            ></div>
+          </el-card>
+
           <!-- 无病灶提示 -->
           <el-result
             v-if="detectResult.objects.length === 0"
@@ -218,6 +242,33 @@ function getConfidenceColor(confidence) {
   if (confidence >= 0.7) return "#27AE60"; // 绿色：高置信度
   if (confidence >= 0.4) return "#F39C12"; // 橙色：中等置信度
   return "#E74C3C"; // 红色：低置信度
+}
+
+function riskTagType(level) {
+  const map = {
+    low: "success",
+    medium: "warning",
+    high: "danger",
+    critical: "danger",
+  };
+  return map[level] || "info";
+}
+function riskLabel(level) {
+  const map = {
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险",
+    critical: "⚠️ 危急",
+  };
+  return map[level] || level;
+}
+function renderMarkdown(text) {
+  if (!text) return "";
+  return text
+    .replace(/### (.+)/g, "<h4>$1</h4>")
+    .replace(/## (.+)/g, "<h3>$1</h3>")
+    .replace(/\n\n/g, "</p><p>")
+    .replace(/\n/g, "<br>");
 }
 
 // ── 触发文件选择 ──
@@ -443,6 +494,33 @@ function handleImageError() {
     background: #f5f7fa;
     padding: 2px 6px;
     border-radius: 3px;
+  }
+}
+
+.analysis-card {
+  margin-top: 16px;
+  border-left: 4px solid #2a9d8f;
+}
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.analysis-content {
+  font-size: 14px;
+  line-height: 1.8;
+  h3 {
+    font-size: 16px;
+    color: #2a9d8f;
+    margin: 12px 0 8px;
+  }
+  h4 {
+    font-size: 14px;
+    color: #333;
+    margin: 8px 0 4px;
+  }
+  p {
+    margin: 4px 0;
   }
 }
 </style>

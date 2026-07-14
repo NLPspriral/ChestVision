@@ -2,6 +2,20 @@
   <div class="page-container">
     <h2>📋 检测历史记录</h2>
 
+    <!-- 日期筛选 -->
+    <div class="filter-bar">
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        range-separator="至"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        @change="fetchTasks"
+      />
+      <el-button @click="clearFilter" v-if="dateRange">清除筛选</el-button>
+    </div>
+
     <el-card shadow="never">
       <el-table
         :data="taskList"
@@ -90,7 +104,39 @@
           <el-descriptions-item label="检测时间" :span="2">{{
             detail.created_at
           }}</el-descriptions-item>
+          <el-descriptions-item label="AI 风险评级" v-if="detail.risk_level">
+            <el-tag
+              :type="
+                detail.risk_level === 'low'
+                  ? 'success'
+                  : detail.risk_level === 'medium'
+                    ? 'warning'
+                    : 'danger'
+              "
+            >
+              {{
+                detail.risk_level === "low"
+                  ? "低风险"
+                  : detail.risk_level === "medium"
+                    ? "中风险"
+                    : detail.risk_level === "high"
+                      ? "高风险"
+                      : "危急"
+              }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="完成时间">{{
+            detail.completed_at || "-"
+          }}</el-descriptions-item>
         </el-descriptions>
+
+        <div v-if="detail.analysis_report" style="margin-top: 16px">
+          <h4>🤖 AI 综合分析</h4>
+          <div
+            class="analysis-text"
+            v-html="simpleMd(detail.analysis_report)"
+          ></div>
+        </div>
 
         <h4 style="margin-top: 20px">病灶列表</h4>
         <el-table
@@ -131,6 +177,7 @@ const taskList = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(15);
+const dateRange = ref(null);
 
 const detailVisible = ref(false);
 const detail = ref(null);
@@ -138,10 +185,12 @@ const detail = ref(null);
 async function fetchTasks() {
   loading.value = true;
   try {
-    const res = await getDetectionTasks({
-      page: page.value,
-      page_size: pageSize.value,
-    });
+    const params = { page: page.value, page_size: pageSize.value };
+    if (dateRange.value) {
+      params.start_date = dateRange.value[0];
+      params.end_date = dateRange.value[1];
+    }
+    const res = await getDetectionTasks(params);
     taskList.value = res.items;
     total.value = res.total;
   } catch {
@@ -149,6 +198,20 @@ async function fetchTasks() {
   } finally {
     loading.value = false;
   }
+}
+
+function clearFilter() {
+  dateRange.value = null;
+  fetchTasks();
+}
+
+function simpleMd(text) {
+  if (!text) return "";
+  return text
+    .replace(/### (.+)/g, "<h4>$1</h4>")
+    .replace(/## (.+)/g, "<h3>$1</h3>")
+    .replace(/\n\n/g, "</p><p>")
+    .replace(/\n/g, "<br>");
 }
 
 async function showDetail(row) {
@@ -171,6 +234,12 @@ onMounted(fetchTasks);
     font-size: 20px;
   }
 }
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .pagination-wrap {
   display: flex;
   justify-content: flex-end;
@@ -179,5 +248,20 @@ onMounted(fetchTasks);
 .text-secondary {
   color: #909399;
   font-size: 13px;
+}
+.analysis-text {
+  font-size: 14px;
+  line-height: 1.8;
+  background: #f9fafb;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border-left: 4px solid #2a9d8f;
+  h3 {
+    font-size: 15px;
+    color: #2a9d8f;
+  }
+  p {
+    margin: 4px 0;
+  }
 }
 </style>

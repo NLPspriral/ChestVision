@@ -83,7 +83,7 @@ const allMenuItems = [
     path: "/medical-records",
     title: "病例管理",
     icon: Document,
-    roles: ["admin", "doctor"],
+    roles: ["admin", "doctor", "patient"],
   },
   {
     path: "/history",

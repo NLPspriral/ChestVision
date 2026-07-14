@@ -176,58 +176,81 @@ async function sendMsg() {
   agentStore.addMessage({ role: "assistant", content: "", loading: true });
   scrollBottom();
 
-  // 上传所有文件
-  const paths = [];
-  for (const f of files) {
-    try {
-      const fd = new FormData();
-      fd.append("file", f);
-      const up = await request.post("/chat/upload", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 60000,
-      });
-      paths.push(up.image_path);
-    } catch (e) {
-      const last = agentStore.messages[agentStore.messages.length - 1];
-      last.content = `${f.name} 上传失败：${e.response?.data?.detail || e.message}`;
-      last.loading = false;
-      return;
+  // ── 有图片：直接走检测 API（入库 + AI 分析）──
+  if (files.length > 0) {
+    const last = agentStore.messages[agentStore.messages.length - 1];
+    last.content = "🔍 正在检测病灶...";
+
+    const detectionResults = [];
+    for (const f of files) {
+      try {
+        const fd = new FormData();
+        fd.append("file", f);
+        const detectRes = await request.post("/detection/detect", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 120000,
+        });
+        detectionResults.push(detectRes);
+      } catch (e) {
+        last.content = `${f.name} 检测失败：${e.response?.data?.detail || e.message}`;
+        last.loading = false;
+        return;
+      }
     }
+
+    last.loading = false;
+
+    if (detectionResults.length === 1) {
+      const r = detectionResults[0];
+      const classCounts = {};
+      r.objects.forEach((o) => {
+        classCounts[o.class_name_cn] = (classCounts[o.class_name_cn] || 0) + 1;
+      });
+      last.detectionResult = {
+        total_objects: r.total_objects,
+        inference_time: r.inference_time_ms,
+        class_counts: classCounts,
+        detections: r.objects,
+        annotated_image_base64: r.annotated_image_base64 || "",
+      };
+      last.content =
+        r.total_objects > 0
+          ? `检测完成，发现 ${r.total_objects} 个病灶：${r.objects.map((o) => o.class_name_cn).join("、")}`
+          : "检测完成，未发现明显病灶。";
+      if (r.ai_analysis?.report) {
+        last.content += `\n\n### AI 综合分析\n${r.ai_analysis.report}`;
+      }
+    } else {
+      const totalObjects = detectionResults.reduce(
+        (s, r) => s + r.total_objects,
+        0,
+      );
+      last.content = `批量检测完成，共 ${detectionResults.length} 张，发现 ${totalObjects} 个病灶。`;
+      last.detectionResult = {
+        total_objects: totalObjects,
+        class_counts: {},
+        detections: detectionResults.flatMap((r) => r.objects),
+        annotated_image_base64: "",
+        inference_time: detectionResults.reduce(
+          (s, r) => s + r.inference_time_ms,
+          0,
+        ),
+      };
+    }
+    scrollBottom();
+    return;
   }
 
-  // SSE — 多文件时注入所有路径
-  let enhancedMsg =
-    text ||
-    (files.length > 1
-      ? `请批量检测这${files.length}张胸片`
-      : "请帮我分析这张胸片");
-  if (paths.length === 1) {
-    enhancedMsg += `\n[附件图片路径: ${paths[0]}]`;
-  } else if (paths.length > 1) {
-    enhancedMsg += `\n[附件图片路径: ${paths.join(", ")}]`;
-  }
-
-  // SSE 流式对话
+  // ── 纯文本：走 Agent SSE 对话 ──
   let fullContent = "";
   const stop = streamChat(
     "/api/chat/stream",
-    { message: enhancedMsg, image_path: paths[0] || undefined },
+    { message: text },
     {
       onMessage: (data) => {
         if (data.type === "text_chunk") {
           fullContent += data.content;
           agentStore.updateLastAssistantMessage(fullContent);
-          scrollBottom();
-        } else if (data.type === "tool_call") {
-          const last = agentStore.messages[agentStore.messages.length - 1];
-          last.toolCall = { tool: data.tool, input: data.input };
-        } else if (data.type === "detection_card") {
-          // 完整检测结果（含 base64 图片），直接渲染卡片
-          const last = agentStore.messages[agentStore.messages.length - 1];
-          last.detectionResult = data.data;
-          last.loading = false;
-          scrollBottom();
-        } else if (data.type === "tool_result") {
           scrollBottom();
         } else if (data.type === "error") {
           const last = agentStore.messages[agentStore.messages.length - 1];
@@ -260,7 +283,7 @@ function stopChat() {
   }
 }
 
-// 快捷检测
+// 快捷检测 — 直接调快捷 API（不入库、不 AI 分析）
 async function quickDetect(type) {
   const input = document.createElement("input");
   input.type = "file";
@@ -281,20 +304,16 @@ async function quickDetect(type) {
     });
     agentStore.addMessage({
       role: "assistant",
-      content: "正在检测中...",
+      content: "🔍 检测中...",
       loading: true,
     });
     scrollBottom();
 
     try {
       const fd = new FormData();
-      if (isZip) {
-        fd.append("file", files[0]);
-      } else if (files.length === 1) {
-        fd.append("file", files[0]);
-      } else {
-        files.forEach((f) => fd.append("files", f));
-      }
+      if (isZip) fd.append("file", files[0]);
+      else if (files.length === 1) fd.append("file", files[0]);
+      else files.forEach((f) => fd.append("files", f));
 
       const api = isZip
         ? detectZip
@@ -303,11 +322,12 @@ async function quickDetect(type) {
           : detectBatch;
       const result = await api(fd);
       const last = agentStore.messages[agentStore.messages.length - 1];
-      last.content = result.error
-        ? `检测失败：${result.error}`
-        : `检测完成！发现 ${result.total_objects ?? 0} 个病灶。`;
+      last.content =
+        result.total_objects > 0
+          ? `检测完成！发现 ${result.total_objects} 个病灶`
+          : "检测完成，未发现明显病灶";
       last.loading = false;
-      if (!result.error) last.detectionResult = result;
+      last.detectionResult = result;
     } catch (err) {
       const last = agentStore.messages[agentStore.messages.length - 1];
       last.content = `检测失败：${err.message}`;
