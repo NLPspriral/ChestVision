@@ -26,6 +26,9 @@ export const useUserStore = defineStore("user", {
     /** 用户头像 */
     avatar: (state) => state.user?.avatar || "",
 
+    /** 用户类型 */
+    userType: (state) => state.user?.user_type || "patient",
+
     /** 用户角色列表 */
     roles: (state) => state.user?.roles || [],
 

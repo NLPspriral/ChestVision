@@ -48,6 +48,8 @@ import {
   Clock,
   Cpu,
   DataAnalysis,
+  Document,
+  User,
 } from "@element-plus/icons-vue";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -58,13 +60,49 @@ const collapsed = ref(false);
 
 const activeMenu = computed(() => "/" + route.path.split("/")[1]);
 
-const menuItems = [
-  { path: "/chat", title: "智能对话", icon: ChatDotRound },
-  { path: "/detection", title: "检测工作台", icon: Camera },
-  { path: "/training", title: "模型训练", icon: Cpu },
-  { path: "/history", title: "历史记录", icon: Clock },
-  { path: "/dashboard", title: "数据看板", icon: DataAnalysis },
+const allMenuItems = [
+  {
+    path: "/chat",
+    title: "智能对话",
+    icon: ChatDotRound,
+    roles: ["admin", "doctor", "patient"],
+  },
+  {
+    path: "/detection",
+    title: "检测工作台",
+    icon: Camera,
+    roles: ["admin", "doctor", "patient"],
+  },
+  {
+    path: "/patients",
+    title: "患者管理",
+    icon: User,
+    roles: ["admin", "doctor"],
+  },
+  {
+    path: "/medical-records",
+    title: "病例管理",
+    icon: Document,
+    roles: ["admin", "doctor"],
+  },
+  {
+    path: "/history",
+    title: "历史记录",
+    icon: Clock,
+    roles: ["admin", "doctor", "patient"],
+  },
+  {
+    path: "/dashboard",
+    title: "数据看板",
+    icon: DataAnalysis,
+    roles: ["admin", "doctor"],
+  },
+  { path: "/training", title: "模型训练", icon: Cpu, roles: ["admin"] },
 ];
+
+const menuItems = computed(() =>
+  allMenuItems.filter((item) => item.roles.includes(userStore.userType)),
+);
 </script>
 
 <style lang="scss" scoped>

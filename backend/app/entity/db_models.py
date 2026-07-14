@@ -48,6 +48,12 @@ class User(Base):
     avatar = Column(String(500), nullable=True, comment="头像 URL")
     is_active = Column(Boolean, default=True, comment="是否启用")
     is_superuser = Column(Boolean, default=False, comment="是否超级管理员")
+    user_type = Column(
+        String(20),
+        nullable=False,
+        default="patient",
+        comment="用户类型：admin / doctor / patient",
+    )
     last_login_at = Column(DateTime, nullable=True, comment="最后登录时间")
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     updated_at = Column(
@@ -62,6 +68,23 @@ class User(Base):
     training_tasks = relationship("TrainingTask", back_populates="user")
     chat_sessions = relationship("ChatSession", back_populates="user")
     operation_logs = relationship("OperationLog", back_populates="user")
+    # v3.0 新增
+    patient_profile = relationship(
+        "PatientProfile",
+        back_populates="user",
+        uselist=False,
+        foreign_keys="PatientProfile.user_id",
+    )
+    doctor_patients = relationship(
+        "DoctorPatientRelation",
+        back_populates="doctor",
+        foreign_keys="DoctorPatientRelation.doctor_id",
+    )
+    assigned_doctors = relationship(
+        "DoctorPatientRelation",
+        back_populates="patient",
+        foreign_keys="DoctorPatientRelation.patient_id",
+    )
 
 
 class Role(Base):
@@ -214,6 +237,20 @@ class DetectionTask(Base):
         nullable=True,
         comment="使用的模型版本",
     )
+    # v3.0 新增：关联患者与影像
+    patient_profile_id = Column(
+        Integer,
+        ForeignKey("patient_profiles.id"),
+        nullable=True,
+        index=True,
+        comment="关联患者档案",
+    )
+    cxr_image_id = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="关联胸片影像记录（cxr_images 表待建）",
+    )
     task_type = Column(
         String(20), nullable=False, comment="检测类型：single/batch/folder/video/camera"
     )
@@ -242,6 +279,9 @@ class DetectionTask(Base):
     risk_level = Column(
         String(20), nullable=True, comment="风险等级：low/medium/high/critical"
     )
+    referenced_record_ids = Column(
+        JSON, nullable=True, comment="LLM 分析时引用的历史病例 ID 列表"
+    )
     analyzed_at = Column(DateTime, nullable=True, comment="分析完成时间")
 
     created_at = Column(DateTime, default=datetime.now, index=True, comment="创建时间")
@@ -251,6 +291,11 @@ class DetectionTask(Base):
     user = relationship("User", back_populates="detection_tasks")
     scene = relationship("DetectionScene", back_populates="detection_tasks")
     model_version = relationship("ModelVersion", back_populates="detection_tasks")
+    patient_profile = relationship(
+        "PatientProfile",
+        back_populates="detection_tasks",
+        foreign_keys=[patient_profile_id],
+    )
     results = relationship(
         "DetectionResult", back_populates="task", cascade="all, delete-orphan"
     )
@@ -578,3 +623,189 @@ class OperationLog(Base):
 
     # 关联
     user = relationship("User", back_populates="operation_logs")
+
+
+# ══════════════════════════════════════════════════════════════
+# 八、患者与病例（v3.0 新增）
+# ══════════════════════════════════════════════════════════════
+
+
+class PatientProfile(Base):
+    """患者档案表 — 病人用户的扩展信息"""
+
+    __tablename__ = "patient_profiles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="关联的用户账号",
+    )
+    patient_code = Column(
+        String(50), unique=True, nullable=False, index=True, comment="患者编号"
+    )
+    real_name = Column(String(50), nullable=True, comment="真实姓名")
+    age = Column(Integer, nullable=True)
+    gender = Column(String(10), nullable=True, comment="Male / Female / Unknown")
+    birth_date = Column(DateTime, nullable=True, comment="出生日期")
+    id_card_hash = Column(String(64), nullable=True, comment="身份证号哈希")
+    blood_type = Column(String(5), nullable=True, comment="血型")
+    height_cm = Column(Float, nullable=True, comment="身高 cm")
+    weight_kg = Column(Float, nullable=True, comment="体重 kg")
+    allergies = Column(Text, nullable=True, comment="过敏史")
+    department = Column(String(100), nullable=True, comment="就诊科室")
+    emergency_contact = Column(String(50), nullable=True, comment="紧急联系人")
+    emergency_phone = Column(String(20), nullable=True, comment="紧急联系电话")
+    notes = Column(Text, nullable=True, comment="备注")
+    is_active = Column(Boolean, default=True, comment="是否启用")
+    created_by = Column(
+        Integer, ForeignKey("users.id"), nullable=True, comment="创建人"
+    )
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+    # 关联
+    user = relationship(
+        "User", back_populates="patient_profile", foreign_keys=[user_id]
+    )
+    medical_records = relationship("MedicalRecord", back_populates="patient_profile")
+    # TODO: 待 CxrImage / DetectionReport 模型创建后取消注释
+    # cxr_images = relationship("CxrImage", back_populates="patient_profile")
+    # detection_reports = relationship(
+    #     "DetectionReport", back_populates="patient_profile"
+    # )
+    detection_tasks = relationship(
+        "DetectionTask",
+        back_populates="patient_profile",
+        foreign_keys="DetectionTask.patient_profile_id",
+    )
+
+
+class DoctorPatientRelation(Base):
+    """医患关联表 — 医生和病人的多对多关系"""
+
+    __tablename__ = "doctor_patient_relations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    doctor_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+        comment="医生用户ID",
+    )
+    patient_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+        comment="病人用户ID",
+    )
+    relation_status = Column(String(20), default="active", comment="active / inactive")
+    notes = Column(String(500), nullable=True, comment="备注")
+    assigned_by = Column(
+        Integer, ForeignKey("users.id"), nullable=True, comment="分配者（管理员）"
+    )
+    created_at = Column(DateTime, default=datetime.now, comment="关联时间")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+    # 关联
+    doctor = relationship(
+        "User", back_populates="doctor_patients", foreign_keys=[doctor_id]
+    )
+    patient = relationship(
+        "User", back_populates="assigned_doctors", foreign_keys=[patient_id]
+    )
+
+
+class MedicalRecord(Base):
+    """病例表 — 结构化临床病例记录"""
+
+    __tablename__ = "medical_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    patient_profile_id = Column(
+        Integer,
+        ForeignKey("patient_profiles.id"),
+        nullable=False,
+        index=True,
+        comment="所属患者",
+    )
+    record_uuid = Column(
+        String(100), unique=True, nullable=False, index=True, comment="病例唯一标识"
+    )
+    record_type = Column(
+        String(30),
+        default="outpatient",
+        comment="outpatient / inpatient / follow_up / emergency",
+    )
+    chief_complaint = Column(Text, nullable=True, comment="主诉")
+    present_illness = Column(Text, nullable=True, comment="现病史")
+    past_history = Column(Text, nullable=True, comment="既往史")
+    family_history = Column(Text, nullable=True, comment="家族史")
+    physical_examination = Column(Text, nullable=True, comment="体格检查")
+    auxiliary_exams = Column(JSON, nullable=True, comment="辅助检查结果")
+    diagnosis = Column(JSON, nullable=True, comment="诊断结论列表")
+    treatment_plan = Column(Text, nullable=True, comment="治疗方案")
+    prescription = Column(JSON, nullable=True, comment="处方信息")
+    doctor_notes = Column(Text, nullable=True, comment="医生备注")
+    record_status = Column(
+        String(20), default="draft", comment="draft / completed / reviewed"
+    )
+    visit_date = Column(DateTime, nullable=True, comment="就诊日期")
+    created_by = Column(
+        Integer, ForeignKey("users.id"), nullable=False, comment="创建医生"
+    )
+    updated_by = Column(
+        Integer, ForeignKey("users.id"), nullable=True, comment="最后编辑者"
+    )
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+    # 关联
+    patient_profile = relationship("PatientProfile", back_populates="medical_records")
+    attachments = relationship(
+        "MedicalRecordAttachment", back_populates="record", cascade="all, delete-orphan"
+    )
+
+
+class MedicalRecordAttachment(Base):
+    """病例附件表"""
+
+    __tablename__ = "medical_record_attachments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    record_id = Column(
+        Integer,
+        ForeignKey("medical_records.id"),
+        nullable=False,
+        index=True,
+        comment="所属病例",
+    )
+    attachment_type = Column(
+        String(20),
+        nullable=False,
+        comment="cxr_image / lab_report / prescription / other",
+    )
+    file_name = Column(String(255), nullable=False, comment="文件名")
+    minio_path = Column(String(500), nullable=False, comment="MinIO 路径")
+    minio_url = Column(String(500), nullable=True, comment="预签名 URL")
+    file_size = Column(BigInteger, nullable=True, comment="文件大小")
+    mime_type = Column(String(100), nullable=True, comment="MIME 类型")
+    description = Column(String(500), nullable=True, comment="附件描述")
+    uploaded_by = Column(
+        Integer, ForeignKey("users.id"), nullable=True, comment="上传人"
+    )
+    created_at = Column(DateTime, default=datetime.now, comment="上传时间")
+
+    # 关联
+    record = relationship("MedicalRecord", back_populates="attachments")

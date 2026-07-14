@@ -3,8 +3,10 @@
 处理用户注册、登录、鉴权等业务逻辑
 """
 
+import uuid
+
 from app.core.security import create_access_token, hash_password, verify_password
-from app.entity.db_models import User
+from app.entity.db_models import PatientProfile, User
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -13,7 +15,13 @@ class UserService:
     """用户服务"""
 
     @staticmethod
-    def register(db: Session, username: str, email: str, password: str) -> User:
+    def register(
+        db: Session,
+        username: str,
+        email: str,
+        password: str,
+        user_type: str = "patient",
+    ) -> User:
         """
         用户注册
 
@@ -22,6 +30,7 @@ class UserService:
             username: 用户名
             email: 邮箱
             password: 明文密码
+            user_type: 用户类型 admin/doctor/patient
 
         Returns:
             新创建的用户对象
@@ -44,8 +53,21 @@ class UserService:
             username=username,
             email=email,
             hashed_password=hash_password(password),
+            user_type=user_type,
         )
         db.add(new_user)
+        db.flush()  # 获取 new_user.id
+
+        # 病人注册时自动创建患者档案
+        if user_type == "patient":
+            patient_code = f"P{new_user.id:06d}"
+            profile = PatientProfile(
+                user_id=new_user.id,
+                patient_code=patient_code,
+                created_by=new_user.id,
+            )
+            db.add(profile)
+
         db.commit()
         db.refresh(new_user)
 

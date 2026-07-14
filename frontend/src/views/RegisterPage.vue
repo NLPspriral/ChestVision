@@ -35,6 +35,26 @@
               prefix-icon="Message"
             />
           </el-form-item>
+          <el-form-item prop="userType">
+            <el-select
+              v-model="registerForm.userType"
+              placeholder="选择用户类型"
+              style="width: 100%"
+            >
+              <el-option
+                label="👤 病人 — 上传个人胸片、查看报告"
+                value="patient"
+              />
+              <el-option
+                label="👨‍⚕️ 医生 — 管理病人、编辑病例、分析诊断"
+                value="doctor"
+              />
+              <el-option
+                label="⚙️ 管理员 — 系统管理、分配医患关系"
+                value="admin"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item prop="password">
             <el-input
               v-model="registerForm.password"
@@ -90,6 +110,7 @@ const registerForm = reactive({
   email: "",
   password: "",
   confirmPassword: "",
+  userType: "patient",
 });
 
 /** 确认密码验证器 */
@@ -111,6 +132,7 @@ const registerRules = {
     { required: true, message: "请输入邮箱", trigger: "blur" },
     { type: "email", message: "请输入有效的邮箱地址", trigger: "blur" },
   ],
+  userType: [{ required: true, message: "请选择用户类型", trigger: "change" }],
   password: [
     { required: true, message: "请输入密码", trigger: "blur" },
     { min: 6, message: "密码至少 6 个字符", trigger: "blur" },
@@ -132,6 +154,7 @@ async function handleRegister() {
       username: registerForm.username,
       email: registerForm.email,
       password: registerForm.password,
+      user_type: registerForm.userType,
     });
 
     ElMessage.success("注册成功，请登录");

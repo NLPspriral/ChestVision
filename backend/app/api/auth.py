@@ -62,6 +62,7 @@ async def register(request: UserRegister, db: Session = Depends(get_db)):
         username=request.username,
         email=request.email,
         password=request.password,
+        user_type=request.user_type,
     )
     return user
 
@@ -91,6 +92,7 @@ async def login(request: UserLogin, db: Session = Depends(get_db)):
             "username": user.username,
             "email": user.email,
             "avatar": user.avatar,
+            "user_type": user.user_type,
             "roles": roles,
         },
     }
@@ -109,6 +111,7 @@ async def get_current_user_info(
         "email": current_user.email,
         "phone": current_user.phone,
         "avatar": current_user.avatar,
+        "user_type": current_user.user_type,
         "is_active": current_user.is_active,
         "is_superuser": current_user.is_superuser,
         "roles": roles,

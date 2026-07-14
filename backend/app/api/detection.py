@@ -105,10 +105,10 @@ async def detect(
         # ── 保存检测记录到数据库 ──
         task = detection_service.save_detection_task(
             db=db,
-            user_id=current_user.id,
-            scene_id=scene.id,
-            model_version_id=model_version.id if model_version else None,
-            image_path=file.filename,
+            user_id=current_user.id,  # type: ignore[arg-type]
+            scene_id=scene.id,  # type: ignore[arg-type]
+            model_version_id=model_version.id if model_version else None,  # type: ignore[arg-type]
+            image_path=file.filename or "",
             predict_result=result,
         )
 
@@ -147,10 +147,10 @@ async def get_annotated_image(
     result = (
         db.query(DetectionResult).filter(DetectionResult.task_id == task_id).first()
     )
-    if not result or not result.annotated_image_url:
+    if not result or not result.annotated_image_url:  # type: ignore[arg-type]
         raise HTTPException(status_code=404, detail="标注图片不存在")
 
-    annotated_path = result.annotated_image_url
+    annotated_path: str = result.annotated_image_url  # type: ignore[assignment]
     if not os.path.exists(annotated_path):
         raise HTTPException(status_code=404, detail="标注图片文件不存在")
 
@@ -242,7 +242,7 @@ async def get_detection_task_detail(
         "iou_threshold": task.iou_threshold,
         "image_size": task.image_size,
         "created_at": str(task.created_at),
-        "completed_at": str(task.completed_at) if task.completed_at else None,
+        "completed_at": str(task.completed_at) if task.completed_at else None,  # type: ignore[arg-type]
         "objects": results,
         "annotated_image_url": f"/api/detection/image/{task_id}",
     }

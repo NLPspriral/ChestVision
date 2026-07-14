@@ -8,7 +8,7 @@
 """
 
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from app.config.settings import settings
 from app.core.logger import get_logger
@@ -129,8 +129,8 @@ def create_llm():
 
     return ChatOpenAI(
         model=model_name,
-        openai_api_key=api_key,
-        openai_api_base=base_url,
+        api_key=api_key,  # type: ignore[arg-type]
+        base_url=base_url,
         temperature=0.1,
     )
 
@@ -143,7 +143,7 @@ def create_llm():
 class DetectionAgent:
     """胸片检测智能体（懒加载 LLM）"""
 
-    _last_result: dict = None  # 存储最近一次检测完整结果（含 base64）
+    _last_result: Optional[dict] = None  # 存储最近一次检测完整结果（含 base64）
 
     def __init__(self):
         self.llm = None
@@ -180,8 +180,8 @@ class DetectionAgent:
 
         self.llm = ChatOpenAI(
             model=model,
-            openai_api_key=api_key,
-            openai_api_base=base_url,
+            api_key=api_key,  # type: ignore[arg-type]
+            base_url=base_url,
             temperature=0.1,
         )
 
@@ -208,9 +208,10 @@ class DetectionAgent:
         )
         logger.info("DetectionAgent 初始化完成")
 
-    async def chat(self, message: str, image_path: str = None) -> dict:
+    async def chat(self, message: str, image_path: Optional[str] = None) -> dict:
         """处理用户对话消息"""
         self._ensure_initialized()
+        assert self.executor is not None
         if image_path:
             message = f"{message}\n[附件图片路径: {image_path}]"
         try:
@@ -223,9 +224,12 @@ class DetectionAgent:
             logger.error("Agent 执行异常: %s", str(e), exc_info=True)
             return {"output": f"抱歉，处理出错：{str(e)}", "intermediate_steps": []}
 
-    async def chat_stream(self, message: str, image_path: str = None) -> AsyncGenerator:
+    async def chat_stream(
+        self, message: str, image_path: Optional[str] = None
+    ) -> AsyncGenerator:
         """流式处理对话消息（用于 SSE）"""
         self._ensure_initialized()
+        assert self.executor is not None
         if image_path:
             message = f"{message}\n[附件图片路径: {image_path}]"
         try:
@@ -234,8 +238,8 @@ class DetectionAgent:
             ):
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-                    if hasattr(chunk, "content") and chunk.content:
+                    chunk = event["data"].get("chunk")  # type: ignore[typeddict-unknown-key]
+                    if chunk and hasattr(chunk, "content") and chunk.content:
                         yield {"type": "text_chunk", "content": chunk.content}
                 elif kind == "on_tool_start":
                     yield {
