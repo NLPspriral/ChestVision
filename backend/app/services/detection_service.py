@@ -67,15 +67,20 @@ class DetectionService:
     _model_path: Optional[str] = None
 
     @classmethod
-    def get_model(cls) -> YOLO:
-        """获取或加载 YOLO 模型（单例模式，避免重复加载）"""
-        model_path = os.path.join(
-            os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            ),
-            "models",
-            "best.pt",
-        )
+    def get_model(cls, model_path: str = None) -> YOLO:
+        """获取或加载 YOLO 模型（单例模式，避免重复加载）
+
+        Args:
+            model_path: 可选指定模型路径；不传则使用默认 models/best.pt
+        """
+        if model_path is None:
+            model_path = os.path.join(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                ),
+                "models",
+                "best.pt",
+            )
 
         # 如果模型路径变了，重新加载
         if cls._model is None or cls._model_path != model_path:
@@ -89,12 +94,22 @@ class DetectionService:
         return cls._model
 
     @classmethod
+    def reload_model(cls, model_path: str = None):
+        """强制重新加载模型（训练导出新模型后调用）"""
+        cls._model = None
+        cls._model_path = None
+        if model_path:
+            return cls.get_model(model_path)
+        return cls.get_model()
+
+    @classmethod
     def predict(
         cls,
         image_path: str,
         conf_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         image_size: int = 640,
+        model_path: str = None,
     ) -> dict:
         """
         对单张胸片图像执行病灶检测
@@ -104,6 +119,7 @@ class DetectionService:
             conf_threshold: 置信度阈值
             iou_threshold: NMS IoU 阈值
             image_size: 推理图像尺寸
+            model_path: 可选，指定模型权重路径；不传则使用默认模型
 
         返回：
             {
@@ -115,7 +131,7 @@ class DetectionService:
                 "annotated_image_path": str,
             }
         """
-        model = cls.get_model()
+        model = cls.get_model(model_path) if model_path else cls.get_model()
         start_time = time.time()
 
         # 读取图像获取尺寸

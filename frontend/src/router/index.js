@@ -12,13 +12,11 @@ const routes = [
     path: "/login",
     name: "Login",
     component: () => import("@/views/LoginPage.vue"),
-    meta: { title: "登录", requiresAuth: false },
+    meta: { title: "登录 / 注册", requiresAuth: false },
   },
   {
     path: "/register",
-    name: "Register",
-    component: () => import("@/views/RegisterPage.vue"),
-    meta: { title: "注册", requiresAuth: false },
+    redirect: "/login",
   },
 
   // ── 需要登录的页面（使用 MainLayout 布局） ──────

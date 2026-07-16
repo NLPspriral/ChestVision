@@ -675,8 +675,24 @@ class TrainingService:
             ).update({"is_default": False})
             model_version.is_default = True
 
+            # 将默认模型权重同步到 models/best.pt，检测服务自动使用
+            default_model_path = os.path.join(original_cwd, "models", "best.pt")
+            os.makedirs(os.path.dirname(default_model_path), exist_ok=True)
+            shutil.copy2(exported_weight, default_model_path)
+            logger.info("默认模型已更新: %s", default_model_path)
+
         db.commit()
         db.refresh(model_version)
+
+        # 设为默认时，热重载检测服务中的模型
+        if set_default:
+            try:
+                from app.services.detection_service import detection_service
+
+                detection_service.reload_model()
+                logger.info("检测服务模型已热重载为新导出模型")
+            except Exception as e:
+                logger.warning("检测服务模型重载失败（不影响导出）: %s", str(e))
 
         logger.info(
             "模型导出完成: scene=%s, version=%s, mAP50=%.4f",

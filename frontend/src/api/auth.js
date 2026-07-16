@@ -26,3 +26,11 @@ export function loginApi(data) {
 export function getUserInfoApi() {
   return request.get("/auth/me");
 }
+
+/**
+ * 忘记密码 — 发送重置链接
+ * @param {Object} data - { email }
+ */
+export function forgotPasswordApi(data) {
+  return request.post("/auth/forgot-password", data);
+}

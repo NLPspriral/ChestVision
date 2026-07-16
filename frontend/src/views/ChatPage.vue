@@ -522,6 +522,7 @@ async function handleDeleteSession(sessionId) {
 </script>
 
 <style lang="scss" scoped>
+@use "sass:color";
 .chat-page {
   display: flex;
   flex-direction: column;
@@ -698,7 +699,7 @@ async function handleDeleteSession(sessionId) {
   font-size: 16px;
   transition: left 0.3s;
   &:hover {
-    background: darken($primary-color, 8%);
+    background: color.adjust($primary-color, $lightness: -8%);
   }
 }
 .session-sidebar {
