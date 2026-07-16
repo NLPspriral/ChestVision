@@ -118,7 +118,7 @@
         <el-button type="primary" @click="validateModel" :loading="validating"
           >评估模型</el-button
         >
-        <el-button type="success" @click="exportModel" :loading="exporting"
+        <el-button type="success" @click="showExportDialog = true"
           >导出模型</el-button
         >
         <el-button @click="downloadModel">下载权重</el-button>
@@ -184,6 +184,40 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 【Day 7 新增】导出模型对话框 -->
+    <el-dialog
+      v-model="showExportDialog"
+      title="导出模型"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="exportForm" label-width="100px">
+        <el-form-item label="版本号">
+          <el-input v-model="exportForm.version" placeholder="留空则自动生成，如 v1.0.0" />
+        </el-form-item>
+        <el-form-item label="版本描述">
+          <el-input
+            v-model="exportForm.description"
+            type="textarea"
+            :rows="3"
+            placeholder="记录数据、参数或效果变化"
+          />
+        </el-form-item>
+        <el-form-item label="设为默认">
+          <el-switch v-model="exportForm.set_default" />
+        </el-form-item>
+        <el-form-item label="上传 MinIO">
+          <el-switch v-model="exportForm.upload_minio" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showExportDialog = false">取消</el-button>
+        <el-button type="primary" @click="exportModel" :loading="exporting">
+          确认导出
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="showCreateDialog"
@@ -358,6 +392,13 @@ let pollTimer = null;
 const validating = ref(false);
 const exporting = ref(false);
 const evalReport = ref(null);
+const showExportDialog = ref(false);
+const exportForm = ref({
+  version: "",
+  description: "",
+  set_default: false,
+  upload_minio: true,
+});
 const showPredictDialog = ref(false);
 const predictConf = ref(0.25);
 const predictIou = ref(0.45);
@@ -688,9 +729,13 @@ async function exportModel() {
   exporting.value = true;
   try {
     const taskId = selectedTask.value.id || selectedTask.value.task?.id;
-    const res = await request.post(`/training/export/${taskId}`, {
-      set_default: true,
-    });
+    const payload = {
+      ...exportForm.value,
+      version: exportForm.value.version || null,
+      description: exportForm.value.description || null,
+    };
+    const res = await request.post(`/training/export/${taskId}`, payload);
+    showExportDialog.value = false;
     ElMessage.success(`模型已导出: ${res.version}`);
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || "导出失败");
@@ -700,17 +745,29 @@ async function exportModel() {
 }
 
 // 【Day 7 新增】模型操作：下载
-function downloadModel() {
+async function downloadModel() {
   if (!selectedTask.value) return;
   const taskId = selectedTask.value.id || selectedTask.value.task?.id;
-  const token = localStorage.getItem("token") || "";
-  const url = `/api/training/download/${taskId}`;
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const token = localStorage.getItem("chestx_token") || "";
+  try {
+    const response = await fetch(`/api/training/download/${taskId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      throw new Error("下载失败");
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedTask.value.model_name}_${selectedTask.value.task_uuid}_best.pt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error("下载失败");
+  }
 }
 
 // 【Day 7 新增】测试图验证：选择文件

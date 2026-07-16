@@ -26,7 +26,9 @@ from app.core.logger import get_logger
 from app.database.session import get_db
 from app.entity.schemas import (
     ModelExportRequest,
+    ModelExportResponse,
     ModelValidateRequest,
+    ModelValidateResponse,
     TrainingTaskCreate,
 )
 from app.training.training_service import training_service
@@ -172,7 +174,7 @@ async def get_results_csv(
 # ═══════════════════════════════════════════════════
 
 
-@router.post("/validate/{task_id}")
+@router.post("/validate/{task_id}", response_model=ModelValidateResponse)
 async def validate_model(
     task_id: int,
     request: ModelValidateRequest = None,
@@ -200,7 +202,7 @@ async def validate_model(
     return result
 
 
-@router.post("/export/{task_id}")
+@router.post("/export/{task_id}", response_model=ModelExportResponse)
 async def export_model(
     task_id: int,
     request: ModelExportRequest = None,

@@ -408,7 +408,7 @@ class TrainingService:
         if not data_yaml or not os.path.exists(data_yaml):
             if task.dataset_path:
                 data_yaml = os.path.join(task.dataset_path, "data.yaml")
-            if not os.path.exists(data_yaml):
+            if not data_yaml or not os.path.exists(data_yaml):
                 return {"error": "data.yaml 不存在"}
 
         # 临时修改 data.yaml 的 path 为绝对路径
@@ -513,9 +513,16 @@ class TrainingService:
             )
             return report
 
+        except Exception as e:
+            db.rollback()
+            logger.error("模型评估异常: task_id=%d, error=%s", task_id, str(e), exc_info=True)
+            return {"error": f"评估失败: {str(e)}"}
         finally:
-            with open(data_yaml, "w", encoding="utf-8") as f:
-                f.write(original_content)
+            try:
+                with open(data_yaml, "w", encoding="utf-8") as f:
+                    f.write(original_content)
+            except Exception as e:
+                logger.warning("恢复 data.yaml 失败: %s", str(e))
 
     @staticmethod
     def export_model(
@@ -560,6 +567,36 @@ class TrainingService:
             )
             version = f"v{existing_count + 1}.0.0"
 
+        task_output_dir = os.path.join(
+            original_cwd, settings.TRAIN_OUTPUT_DIR, f"task_{task.task_uuid}"
+        )
+        csv_path = os.path.join(task_output_dir, "results.csv")
+        if not os.path.exists(csv_path):
+            return {"error": f"results.csv 不存在，无法导出模型评估指标: {csv_path}"}
+
+        overall = {}
+        try:
+            with open(csv_path, "r", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            if not rows:
+                return {"error": f"results.csv 为空，无法导出模型评估指标: {csv_path}"}
+            last_row = {k.strip(): v.strip() for k, v in rows[-1].items()}
+            overall = {
+                "precision": _safe_float(last_row.get("metrics/precision(B)", "")),
+                "recall": _safe_float(last_row.get("metrics/recall(B)", "")),
+                "map50": _safe_float(last_row.get("metrics/mAP50(B)", "")),
+                "map50_95": _safe_float(last_row.get("metrics/mAP50-95(B)", "")),
+            }
+        except Exception as e:
+            logger.warning("读取 results.csv 失败: %s", e)
+            return {"error": f"读取 results.csv 失败，无法导出模型评估指标: {str(e)}"}
+
+        missing_metrics = [key for key, value in overall.items() if value is None]
+        if missing_metrics:
+            return {
+                "error": f"results.csv 缺少有效评估指标，无法导出模型: {', '.join(missing_metrics)}"
+            }
+
         export_dir = os.path.join(original_cwd, "models", f"{scene.name}_{version}")
         os.makedirs(export_dir, exist_ok=True)
 
@@ -568,9 +605,6 @@ class TrainingService:
         logger.info("模型文件已复制: %s → %s", weights_path, exported_weight)
 
         # 复制评估图表
-        task_output_dir = os.path.join(
-            original_cwd, settings.TRAIN_OUTPUT_DIR, f"task_{task.task_uuid}"
-        )
         for plot_name in [
             "confusion_matrix.png",
             "PR_curve.png",
@@ -581,29 +615,7 @@ class TrainingService:
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(export_dir, plot_name))
 
-        # 从 results.csv 读取最终指标
-        csv_path = os.path.join(task_output_dir, "results.csv")
-        overall = {}
         per_class = {}
-        if os.path.exists(csv_path):
-            try:
-                with open(csv_path, "r", encoding="utf-8") as f:
-                    rows = list(csv.DictReader(f))
-                if rows:
-                    last_row = {k.strip(): v.strip() for k, v in rows[-1].items()}
-                    overall = {
-                        "precision": _safe_float(
-                            last_row.get("metrics/precision(B)", "")
-                        ),
-                        "recall": _safe_float(last_row.get("metrics/recall(B)", "")),
-                        "map50": _safe_float(last_row.get("metrics/mAP50(B)", "")),
-                        "map50_95": _safe_float(
-                            last_row.get("metrics/mAP50-95(B)", "")
-                        ),
-                    }
-            except Exception as e:
-                logger.warning("读取 results.csv 失败: %s", e)
-
         # 从已有 ModelVersion 获取每类指标
         existing_version = (
             db.query(ModelVersion)
