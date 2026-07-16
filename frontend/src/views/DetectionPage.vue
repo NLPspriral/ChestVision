@@ -46,6 +46,22 @@
                 show-input
               />
             </div>
+            <div class="param-item">
+              <span>检测模型</span>
+              <el-select
+                v-model="selectedModelId"
+                placeholder="选择模型（默认自动）"
+                style="width: 100%"
+                clearable
+              >
+                <el-option
+                  v-for="m in modelList"
+                  :key="m.id"
+                  :label="`${m.model_name} (mAP50: ${m.map50 ? (m.map50 * 100).toFixed(1) + '%' : '-'})${m.is_default ? ' ★' : ''}`"
+                  :value="m.id"
+                />
+              </el-select>
+            </div>
           </div>
 
           <!-- 检测按钮 -->
@@ -204,7 +220,7 @@
 <script setup>
 import { Loading, UploadFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 
 // ── 上传相关 ──
 const fileInput = ref(null);
@@ -215,6 +231,10 @@ const isDragover = ref(false);
 // ── 检测参数 ──
 const confThreshold = ref(0.25);
 const detecting = ref(false);
+
+// ── 模型选择 ──
+const modelList = ref([]);
+const selectedModelId = ref(null);
 
 // ── 检测结果 ──
 const detectResult = ref(null);
@@ -306,6 +326,26 @@ function setFile(file) {
   reader.readAsDataURL(file);
 }
 
+// ── 加载可用模型列表 ──
+async function fetchModels() {
+  try {
+    const { default: request } = await import("@/utils/request");
+    const res = await request.get("/detection/models");
+    modelList.value = res.models || [];
+    // 自动选中默认模型
+    const defaultModel = modelList.value.find((m) => m.is_default);
+    if (defaultModel) {
+      selectedModelId.value = defaultModel.id;
+    }
+  } catch {
+    /* 模型列表加载失败不影响检测 */
+  }
+}
+
+onMounted(() => {
+  fetchModels();
+});
+
 // ── 开始检测 ──
 async function startDetect() {
   if (!selectedFile.value) return;
@@ -319,9 +359,13 @@ async function startDetect() {
     formData.append("file", selectedFile.value);
 
     const { default: request } = await import("@/utils/request");
+    const params = { conf_threshold: confThreshold.value };
+    if (selectedModelId.value) {
+      params.model_version_id = selectedModelId.value;
+    }
     const res = await request.post("/detection/detect", formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      params: { conf_threshold: confThreshold.value },
+      params,
       timeout: 60000,
     });
 

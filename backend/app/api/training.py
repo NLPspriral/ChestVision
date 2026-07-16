@@ -60,15 +60,55 @@ async def start_training(
 
     from app.entity.db_models import DetectionScene
 
-    scene = (
-        db.query(DetectionScene).filter(DetectionScene.id == request.scene_id).first()
-    )
-    if not scene:
-        raise HTTPException(status_code=404, detail="检测场景不存在")
-
+    # ── 解析场景：优先 scene_id，其次 scene_name ──
     api_dir = os.path.dirname(os.path.abspath(__file__))
     app_dir = os.path.dirname(api_dir)
     backend_dir = os.path.dirname(app_dir)
+
+    scene = None
+    scene_name = None
+
+    if request.scene_id:
+        scene = (
+            db.query(DetectionScene)
+            .filter(DetectionScene.id == request.scene_id)
+            .first()
+        )
+        if scene:
+            scene_name = scene.name
+
+    if not scene and request.scene_name:
+        scene_name = request.scene_name
+        # 查找已有场景
+        scene = (
+            db.query(DetectionScene).filter(DetectionScene.name == scene_name).first()
+        )
+        # 如果不存在，自动创建
+        if not scene:
+            dataset_yaml = os.path.join(
+                backend_dir, "datasets", scene_name, "yolo_dataset", "data.yaml"
+            )
+            if not os.path.exists(dataset_yaml):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"数据集不存在：datasets/{scene_name}/yolo_dataset/，请先上传数据集",
+                )
+            scene = DetectionScene(
+                name=scene_name,
+                display_name=scene_name,
+                category="custom",
+                is_active=True,
+                created_by=current_user.id,
+            )
+            db.add(scene)
+            db.commit()
+            db.refresh(scene)
+
+    if not scene:
+        raise HTTPException(
+            status_code=404, detail="检测场景不存在，请指定 scene_id 或 scene_name"
+        )
+
     dataset_path = os.path.join(backend_dir, "datasets", scene.name, "yolo_dataset")
     config["dataset_path"] = dataset_path
 
@@ -82,7 +122,7 @@ async def start_training(
         task = training_service.start_training(
             db=db,
             user_id=current_user.id,
-            scene_id=request.scene_id,
+            scene_id=scene.id,
             config=config,
         )
     except Exception as e:
@@ -351,3 +391,186 @@ async def predict_test_image(
             os.unlink(tmp_path)
         except Exception:
             pass
+
+
+# ══════════════════════════════════════════════════════════════
+# 数据集管理 API
+# ══════════════════════════════════════════════════════════════
+
+
+@router.get("/datasets", summary="获取可用数据集列表")
+async def list_datasets():
+    """列出 datasets 目录下所有可用的 YOLO 格式数据集"""
+    api_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(api_dir)
+    backend_dir = os.path.dirname(app_dir)
+    datasets_root = os.path.join(backend_dir, "datasets")
+
+    if not os.path.exists(datasets_root):
+        return {"datasets": []}
+
+    result = []
+    for scene_name in os.listdir(datasets_root):
+        scene_dir = os.path.join(datasets_root, scene_name)
+        if not os.path.isdir(scene_dir):
+            continue
+        yolo_dir = os.path.join(scene_dir, "yolo_dataset")
+        data_yaml = os.path.join(yolo_dir, "data.yaml")
+        has_data = os.path.exists(data_yaml)
+
+        # 统计图片数量
+        train_count = 0
+        val_count = 0
+        train_img_dir = os.path.join(yolo_dir, "images", "train")
+        val_img_dir = os.path.join(yolo_dir, "images", "val")
+        if os.path.exists(train_img_dir):
+            train_count = len(
+                [
+                    f
+                    for f in os.listdir(train_img_dir)
+                    if f.lower().endswith((".jpg", ".png", ".jpeg"))
+                ]
+            )
+        if os.path.exists(val_img_dir):
+            val_count = len(
+                [
+                    f
+                    for f in os.listdir(val_img_dir)
+                    if f.lower().endswith((".jpg", ".png", ".jpeg"))
+                ]
+            )
+
+        result.append(
+            {
+                "name": scene_name,
+                "has_data": has_data,
+                "train_count": train_count,
+                "val_count": val_count,
+                "total_count": train_count + val_count,
+            }
+        )
+
+    return {"datasets": result}
+
+
+@router.post("/datasets/upload", summary="上传 YOLO 格式数据集")
+async def upload_dataset(
+    file: UploadFile = File(...),
+    dataset_name: str = Form(...),
+    current_user=Depends(get_current_user),
+):
+    """
+    上传 YOLO 格式数据集 ZIP 包
+
+    ZIP 包结构要求：
+        images/
+            train/  (训练图片)
+            val/    (验证图片，可选)
+        labels/
+            train/  (YOLO 标注 .txt)
+            val/    (验证标注 .txt，可选)
+        data.yaml (可选，如无则自动生成)
+    """
+    import shutil
+    import zipfile
+
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="仅支持 .zip 格式")
+
+    # 安全检查：dataset_name 只允许字母数字下划线连字符
+    safe_name = "".join(c for c in dataset_name if c.isalnum() or c in "_-")
+    if not safe_name or safe_name != dataset_name:
+        raise HTTPException(
+            status_code=400, detail="数据集名称仅支持字母、数字、下划线、连字符"
+        )
+
+    api_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(api_dir)
+    backend_dir = os.path.dirname(app_dir)
+    target_dir = os.path.join(backend_dir, "datasets", safe_name, "yolo_dataset")
+
+    # 如果已存在，先删除
+    if os.path.exists(target_dir):
+        shutil.rmtree(target_dir)
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    # 解压
+    tmp_zip = os.path.join(tempfile.gettempdir(), f"ds_{safe_name}.zip")
+    try:
+        content = await file.read()
+        with open(tmp_zip, "wb") as f:
+            f.write(content)
+
+        with zipfile.ZipFile(tmp_zip, "r") as zf:
+            zf.extractall(target_dir)
+
+        # 自动生成 data.yaml（如果不存在）
+        data_yaml = os.path.join(target_dir, "data.yaml")
+        if not os.path.exists(data_yaml):
+            # 从标注文件中推断类别
+            class_names = set()
+            labels_train = os.path.join(target_dir, "labels", "train")
+            if os.path.exists(labels_train):
+                for lbl_file in os.listdir(labels_train):
+                    if lbl_file.endswith(".txt"):
+                        with open(os.path.join(labels_train, lbl_file), "r") as lf:
+                            for line in lf:
+                                parts = line.strip().split()
+                                if parts:
+                                    class_names.add(int(parts[0]))
+            nc = len(class_names) if class_names else 10
+            yaml_content = f"""# YOLO 数据集配置
+path: .
+train: images/train
+val: images/val
+nc: {nc}
+names:
+""" + "\n".join([f"  {i}: class_{i}" for i in range(nc)])
+            with open(data_yaml, "w", encoding="utf-8") as f:
+                f.write(yaml_content)
+
+        # 统计
+        train_imgs = (
+            len(
+                [
+                    f
+                    for f in os.listdir(os.path.join(target_dir, "images", "train"))
+                    if f.lower().endswith((".jpg", ".png", ".jpeg"))
+                ]
+            )
+            if os.path.exists(os.path.join(target_dir, "images", "train"))
+            else 0
+        )
+        val_imgs = (
+            len(
+                [
+                    f
+                    for f in os.listdir(os.path.join(target_dir, "images", "val"))
+                    if f.lower().endswith((".jpg", ".png", ".jpeg"))
+                ]
+            )
+            if os.path.exists(os.path.join(target_dir, "images", "val"))
+            else 0
+        )
+
+        logger.info(
+            "用户 %s 上传数据集: %s (train=%d, val=%d)",
+            current_user.username,
+            safe_name,
+            train_imgs,
+            val_imgs,
+        )
+
+        return {
+            "dataset_name": safe_name,
+            "train_count": train_imgs,
+            "val_count": val_imgs,
+            "total_count": train_imgs + val_imgs,
+            "path": target_dir,
+        }
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="无效的 ZIP 文件")
+    finally:
+        if os.path.exists(tmp_zip):
+            os.unlink(tmp_zip)

@@ -66,6 +66,13 @@
             <el-button
               size="small"
               text
+              type="success"
+              @click="printRecord(row)"
+              >打印</el-button
+            >
+            <el-button
+              size="small"
+              text
               type="warning"
               @click="showEditDialog(row)"
               v-if="canEdit"
@@ -184,6 +191,27 @@
             placeholder="备注"
           />
         </el-form-item>
+        <el-form-item label="附件" v-if="editingRecord">
+          <el-upload
+            :action="`/api/medical-records/${editingRecord.id}/attachments`"
+            :headers="{ Authorization: 'Bearer ' + token }"
+            :on-success="onUploadSuccess"
+            :show-file-list="false"
+          >
+            <el-button size="small">📎 上传附件</el-button>
+          </el-upload>
+          <div v-if="attachments.length" style="margin-top: 6px">
+            <el-tag
+              v-for="a in attachments"
+              :key="a.id"
+              closable
+              size="small"
+              style="margin-right: 4px"
+              @close="deleteAttachment(a.id)"
+              >{{ a.file_name }}</el-tag
+            >
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
@@ -266,6 +294,8 @@ const saving = ref(false);
 const filterPatientId = ref(null);
 const patientOptions = ref([]);
 const loadingPatients = ref(false);
+const attachments = ref([]);
+const token = localStorage.getItem("chestx_token") || "";
 
 const form = ref({
   patient_profile_id: null,
@@ -353,6 +383,38 @@ function showCreateDialog() {
   formVisible.value = true;
 }
 
+async function fetchAttachments(recordId) {
+  try {
+    const res = await fetch(`/api/medical-records/${recordId}/attachments`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    attachments.value = data.items || [];
+  } catch {
+    attachments.value = [];
+  }
+}
+
+function onUploadSuccess() {
+  if (editingRecord.value) fetchAttachments(editingRecord.value.id);
+}
+
+async function deleteAttachment(attId) {
+  if (!editingRecord.value) return;
+  try {
+    await fetch(
+      `/api/medical-records/${editingRecord.value.id}/attachments/${attId}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    fetchAttachments(editingRecord.value.id);
+  } catch {
+    /* ignore */
+  }
+}
+
 function showEditDialog(row) {
   editingRecord.value = row;
   // 先获取完整数据再填充
@@ -371,6 +433,7 @@ function showEditDialog(row) {
       visit_date: data.visit_date || null,
     };
     formVisible.value = true;
+    fetchAttachments(row.id);
   });
 }
 
@@ -401,6 +464,17 @@ async function handleSave() {
   } finally {
     saving.value = false;
   }
+}
+
+async function printRecord(row) {
+  const token = localStorage.getItem("chestx_token");
+  const res = await fetch(`/api/medical-records/${row.id}/print`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const html = await res.text();
+  const win = window.open("", "_blank");
+  win.document.write(html);
+  win.document.close();
 }
 
 async function handleDelete(row) {

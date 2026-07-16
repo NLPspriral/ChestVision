@@ -1,19 +1,28 @@
 /**
  * 智能体对话状态管理
  * 管理对话会话列表、当前会话消息等
+ * 支持后端持久化：会话列表从 DB 加载，消息保存到 DB
  */
+import {
+  deleteSessionApi,
+  getSessionMessagesApi,
+  getSessionsApi,
+} from "@/api/chat";
 import { defineStore } from "pinia";
 
 export const useAgentStore = defineStore("agent", {
   state: () => ({
-    // 当前会话 ID
+    // 当前会话 ID（后端 ChatSession.id）
     currentSessionId: null,
 
     // 当前会话的消息列表
     messages: [],
 
-    // 会话列表
+    // 会话列表（从后端加载）
     sessions: [],
+
+    // 是否正在加载会话列表
+    sessionsLoading: false,
 
     // 是否正在等待 AI 响应
     isLoading: false,
@@ -28,6 +37,12 @@ export const useAgentStore = defineStore("agent", {
 
     /** 是否有会话 */
     hasSession: (state) => state.sessions.length > 0,
+
+    /** 当前会话标题 */
+    currentTitle: (state) => {
+      const s = state.sessions.find((s) => s.id === state.currentSessionId);
+      return s?.title || "新对话";
+    },
   },
 
   actions: {
@@ -58,7 +73,7 @@ export const useAgentStore = defineStore("agent", {
       }
     },
 
-    /** 新建对话 */
+    /** 新建对话（本地 + 后端下次请求自动创建） */
     newChat() {
       this.currentSessionId = null;
       this.messages = [];
@@ -71,6 +86,69 @@ export const useAgentStore = defineStore("agent", {
       this.messages = [];
       this.sessions = [];
       this.abort();
+    },
+
+    /** 记录 SSE 返回的 session_id */
+    setCurrentSessionId(sessionId) {
+      if (sessionId && !this.currentSessionId) {
+        this.currentSessionId = sessionId;
+      }
+    },
+
+    // ═══════════════════════════════════════════════════════
+    // 后端会话管理
+    // ═══════════════════════════════════════════════════════
+
+    /** 从后端加载会话列表 */
+    async loadSessions() {
+      this.sessionsLoading = true;
+      try {
+        const res = await getSessionsApi({ status: "all", limit: 50 });
+        this.sessions = res.sessions || [];
+      } catch (e) {
+        console.error("加载会话列表失败:", e);
+      } finally {
+        this.sessionsLoading = false;
+      }
+    },
+
+    /** 加载指定会话的消息历史 */
+    async loadSessionMessages(sessionId) {
+      try {
+        const res = await getSessionMessagesApi(sessionId);
+        const msgs = res.messages || [];
+        this.messages = msgs.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.created_at,
+        }));
+        this.currentSessionId = sessionId;
+      } catch (e) {
+        console.error("加载消息失败:", e);
+        throw e;
+      }
+    },
+
+    /** 切换到指定会话 */
+    async switchSession(sessionId) {
+      if (sessionId === this.currentSessionId) return;
+      await this.loadSessionMessages(sessionId);
+    },
+
+    /** 删除指定会话 */
+    async deleteSession(sessionId) {
+      try {
+        await deleteSessionApi(sessionId);
+        this.sessions = this.sessions.filter((s) => s.id !== sessionId);
+        if (this.currentSessionId === sessionId) {
+          this.newChat();
+        }
+        return true;
+      } catch (e) {
+        console.error("删除会话失败:", e);
+        return false;
+      }
     },
   },
 });

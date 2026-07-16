@@ -261,7 +261,10 @@ class DetectionStatistics(BaseModel):
 class TrainingTaskCreate(BaseModel):
     """创建训练任务"""
 
-    scene_id: int = Field(..., description="关联场景 ID")
+    scene_id: Optional[int] = Field(
+        None, description="关联场景 ID（与 scene_name 二选一）"
+    )
+    scene_name: Optional[str] = Field(None, description="场景名称（自动匹配或创建）")
     model_name: Yolo11ModelName = Field(default="yolo11n", description="基础模型")
     epochs: int = Field(default=100, ge=5, le=500, description="训练轮数")
     img_size: int = Field(default=640, description="图像尺寸")

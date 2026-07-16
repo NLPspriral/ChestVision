@@ -226,6 +226,36 @@
       :close-on-click-modal="false"
     >
       <el-form :model="trainForm" label-width="120px">
+        <el-form-item label="训练数据集">
+          <div
+            style="display: flex; gap: 8px; align-items: center; width: 100%"
+          >
+            <el-select
+              v-model="trainForm.dataset_name"
+              placeholder="选择数据集"
+              style="flex: 1"
+              @change="onDatasetChange"
+            >
+              <el-option
+                v-for="ds in datasetList"
+                :key="ds.name"
+                :label="`${ds.name} (训练${ds.train_count}张 + 验证${ds.val_count}张)`"
+                :value="ds.name"
+              />
+            </el-select>
+            <el-button @click="showUploadDataset = true" :icon="Upload"
+              >上传</el-button
+            >
+          </div>
+          <div
+            v-if="selectedDataset"
+            style="margin-top: 6px; font-size: 12px; color: #909399"
+          >
+            📊 {{ selectedDataset.train_count }} 训练 +
+            {{ selectedDataset.val_count }} 验证 =
+            {{ selectedDataset.total_count }} 张
+          </div>
+        </el-form-item>
         <el-form-item label="检测场景">
           <el-select v-model="trainForm.scene_id" placeholder="选择场景">
             <el-option label="胸片X光病灶检测" :value="1" />
@@ -233,15 +263,17 @@
         </el-form-item>
         <el-form-item label="基础模型">
           <el-select v-model="trainForm.model_name">
-            <el-option label="YOLO11n (Nano)" value="yolo11n" />
-            <el-option label="YOLO11s (Small)" value="yolo11s" />
-            <el-option label="YOLO11m (Medium)" value="yolo11m" />
+            <el-option label="YOLO11n (Nano · 最快)" value="yolo11n" />
+            <el-option label="YOLO11s (Small · 轻量)" value="yolo11s" />
+            <el-option label="YOLO11m (Medium · 均衡)" value="yolo11m" />
+            <el-option label="YOLO11l (Large · 高精度)" value="yolo11l" />
+            <el-option label="YOLO11x (X-Large · 最高精度)" value="yolo11x" />
           </el-select>
         </el-form-item>
         <el-form-item label="训练轮数">
           <el-slider
             v-model="trainForm.epochs"
-            :min="5"
+            :min="10"
             :max="500"
             :step="10"
             show-input
@@ -288,6 +320,44 @@
         <el-button type="primary" @click="createTask" :loading="creating"
           >启动训练</el-button
         >
+      </template>
+    </el-dialog>
+
+    <!-- 上传数据集对话框 -->
+    <el-dialog v-model="showUploadDataset" title="上传训练数据集" width="550px">
+      <el-form label-width="100px">
+        <el-form-item label="数据集名称">
+          <el-input
+            v-model="uploadDatasetName"
+            placeholder="英文名，如 chest_xray_v2"
+          />
+        </el-form-item>
+        <el-form-item label="数据说明">
+          <div style="font-size: 12px; color: #909399; line-height: 1.6">
+            ZIP 包目录结构：<br />
+            ├─ images/train/ &nbsp; 训练图片 (.jpg/.png)<br />
+            ├─ images/val/ &nbsp;&nbsp;&nbsp; 验证图片 <br />
+            ├─ labels/train/ &nbsp; YOLO 标注 (.txt)<br />
+            └─ labels/val/ &nbsp;&nbsp;&nbsp; 验证标注
+          </div>
+        </el-form-item>
+        <el-form-item label="选择文件">
+          <el-upload
+            :auto-upload="false"
+            :limit="1"
+            accept=".zip"
+            :on-change="onUploadFileChange"
+            :file-list="[]"
+          >
+            <el-button type="primary">选择 ZIP 文件</el-button>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showUploadDataset = false">取消</el-button>
+        <el-button type="primary" @click="doUploadDataset" :loading="uploading">
+          上传并准备数据集
+        </el-button>
       </template>
     </el-dialog>
 
@@ -372,7 +442,7 @@
 
 <script setup>
 import request from "@/utils/request";
-import { Plus, Refresh } from "@element-plus/icons-vue";
+import { Plus, Refresh, Upload } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
@@ -387,6 +457,17 @@ const mapChartRef = ref(null);
 let lossChart = null,
   mapChart = null;
 let pollTimer = null;
+
+// 数据集管理
+const datasetList = ref([]);
+const showUploadDataset = ref(false);
+const uploadFile = ref(null);
+const uploadDatasetName = ref("");
+const uploading = ref(false);
+
+const selectedDataset = computed(() => {
+  return datasetList.value.find((d) => d.name === trainForm.value.dataset_name);
+});
 
 // 【Day 7 新增】模型操作状态
 const validating = ref(false);
@@ -407,7 +488,8 @@ const predictResult = ref(null);
 let predictFile = null;
 
 const trainForm = ref({
-  scene_id: 1,
+  scene_id: 3,
+  dataset_name: "chest_xray",
   model_name: "yolo11n",
   epochs: 50,
   batch_size: 8,
@@ -533,7 +615,10 @@ async function fetchTasks() {
 async function selectTask(task) {
   selectedTask.value = task;
   await nextTick();
-  initCharts();
+  // 延迟初始化图表，确保 Element Plus 组件完成布局
+  setTimeout(() => {
+    initCharts();
+  }, 100);
   fetchMetrics();
   startPolling();
 }
@@ -541,8 +626,19 @@ async function selectTask(task) {
 function initCharts() {
   if (lossChart) lossChart.dispose();
   if (mapChart) mapChart.dispose();
-  if (lossChartRef.value) lossChart = echarts.init(lossChartRef.value);
-  if (mapChartRef.value) mapChart = echarts.init(mapChartRef.value);
+  if (lossChartRef.value) {
+    lossChart = echarts.init(lossChartRef.value);
+    // 监听窗口 resize 自动重绘
+    window.addEventListener("resize", handleChartResize);
+  }
+  if (mapChartRef.value) {
+    mapChart = echarts.init(mapChartRef.value);
+  }
+}
+
+function handleChartResize() {
+  if (lossChart && !lossChart.isDisposed()) lossChart.resize();
+  if (mapChart && !mapChart.isDisposed()) mapChart.resize();
 }
 
 async function fetchMetrics() {
@@ -673,7 +769,12 @@ function stopPolling() {
 async function createTask() {
   creating.value = true;
   try {
-    const res = await request.post("/training/start", trainForm.value);
+    const payload = {
+      ...trainForm.value,
+      scene_name: trainForm.value.dataset_name, // 用数据集名作为场景名
+    };
+    delete payload.dataset_name;
+    const res = await request.post("/training/start", payload);
     ElMessage.success(`训练任务已创建：${res.task_uuid}`);
     showCreateDialog.value = false;
     await fetchTasks();
@@ -687,6 +788,59 @@ async function createTask() {
     creating.value = false;
   }
 }
+
+// ── 数据集管理 ──
+async function fetchDatasets() {
+  try {
+    const res = await request.get("/training/datasets");
+    datasetList.value = res.datasets || [];
+  } catch {
+    /* ignore */
+  }
+}
+
+function onDatasetChange(name) {
+  if (!name) return;
+  // 数据集名同时也是场景名，需确保 scene 存在
+}
+
+async function doUploadDataset() {
+  if (!uploadFile.value || !uploadDatasetName.value.trim()) {
+    ElMessage.warning("请填写数据集名称并选择 ZIP 文件");
+    return;
+  }
+  uploading.value = true;
+  try {
+    const fd = new FormData();
+    fd.append("file", uploadFile.value);
+    fd.append("dataset_name", uploadDatasetName.value.trim());
+    await request.post("/training/datasets/upload", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120000,
+    });
+    ElMessage.success("数据集上传成功");
+    showUploadDataset.value = false;
+    uploadFile.value = null;
+    uploadDatasetName.value = "";
+    await fetchDatasets();
+    // 自动选中新上传的数据集
+    trainForm.value.dataset_name =
+      uploadDatasetName.value || trainForm.value.dataset_name;
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || "上传失败");
+  } finally {
+    uploading.value = false;
+  }
+}
+
+function onUploadFileChange(file) {
+  uploadFile.value = file.raw;
+}
+
+onMounted(() => {
+  fetchTasks();
+  fetchDatasets();
+});
 
 async function stopTask(taskId) {
   try {
@@ -799,9 +953,13 @@ async function doPredict() {
   }
 }
 
-onMounted(() => fetchTasks());
+onMounted(() => {
+  fetchTasks();
+  fetchDatasets();
+});
 onBeforeUnmount(() => {
   stopPolling();
+  window.removeEventListener("resize", handleChartResize);
   if (lossChart) lossChart.dispose();
   if (mapChart) mapChart.dispose();
 });

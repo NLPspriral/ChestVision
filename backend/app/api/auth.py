@@ -1,19 +1,22 @@
 """
 认证相关 API 路由
-- POST /api/auth/register  用户注册
-- POST /api/auth/login     用户登录
-- GET  /api/auth/me        获取当前用户信息
+- POST /api/auth/register       用户注册
+- POST /api/auth/login          用户登录
+- POST /api/auth/forgot-password  忘记密码
+- GET  /api/auth/me             获取当前用户信息
 """
 
 from typing import Optional
 
 from app.core.security import decode_access_token
 from app.database.session import get_db
+from app.entity.db_models import User
 from app.entity.schemas import TokenResponse, UserLogin, UserRegister, UserResponse
 from app.services.user_service import user_service
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
@@ -96,6 +99,37 @@ async def login(request: UserLogin, db: Session = Depends(get_db)):
             "roles": roles,
         },
     }
+
+
+class ForgotPasswordRequest(BaseModel):
+    username: str
+    email: str
+
+
+@router.post("/forgot-password", status_code=200)
+async def forgot_password(
+    request: ForgotPasswordRequest, db: Session = Depends(get_db)
+):
+    """
+    忘记密码 — 验证用户名+邮箱后发送重置链接
+
+    - **username**: 用户名
+    - **email**: 注册邮箱
+    """
+    user = (
+        db.query(User)
+        .filter(
+            User.username == request.username,
+            User.email == request.email,
+        )
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(status_code=400, detail="用户名或邮箱不正确")
+
+    # TODO: 接入邮件服务后，在此生成重置 token 并发送邮件
+    return {"message": "重置链接已发送，请查收邮件"}
 
 
 @router.get("/me", response_model=UserResponse)

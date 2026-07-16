@@ -42,6 +42,7 @@ async def detect(
     file: UploadFile = File(..., description="胸片图像文件（支持 jpg/png/dicom 等）"),
     conf_threshold: float = Query(0.25, ge=0.01, le=1.0, description="置信度阈值"),
     iou_threshold: float = Query(0.45, ge=0.01, le=1.0, description="NMS IoU 阈值"),
+    model_version_id: int = Query(None, description="指定模型版本ID，不传则自动选择"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -83,13 +84,42 @@ async def detect(
                 status_code=500, detail="检测场景 'chest_xray' 不存在，请先初始化数据库"
             )
 
-        # 获取最新的模型版本
-        model_version = (
-            db.query(ModelVersion)
-            .filter(ModelVersion.scene_id == scene.id)
-            .order_by(ModelVersion.created_at.desc())
-            .first()
-        )
+        # 选择模型版本：指定 > 默认 > 最新
+        model_version = None
+        model_path = None
+        if model_version_id:
+            model_version = (
+                db.query(ModelVersion)
+                .filter(
+                    ModelVersion.id == model_version_id,
+                    ModelVersion.scene_id == scene.id,
+                )
+                .first()
+            )
+            if not model_version:
+                raise HTTPException(
+                    status_code=404, detail=f"模型版本不存在: id={model_version_id}"
+                )
+            model_path = model_version.model_path
+        else:
+            # 优先默认模型，其次最新
+            model_version = (
+                db.query(ModelVersion)
+                .filter(
+                    ModelVersion.scene_id == scene.id,
+                    ModelVersion.is_default == True,  # noqa: E712
+                )
+                .first()
+            )
+            if not model_version:
+                model_version = (
+                    db.query(ModelVersion)
+                    .filter(ModelVersion.scene_id == scene.id)
+                    .order_by(ModelVersion.created_at.desc())
+                    .first()
+                )
+            if model_version:
+                model_path = model_version.model_path
 
         # ── 执行检测 ──
         try:
@@ -97,6 +127,7 @@ async def detect(
                 image_path=tmp_path,
                 conf_threshold=conf_threshold,
                 iou_threshold=iou_threshold,
+                model_path=model_path,
             )
         except FileNotFoundError as e:
             raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
@@ -314,6 +345,40 @@ async def get_detection_task_detail(
         "completed_at": str(task.completed_at) if task.completed_at else None,  # type: ignore[arg-type]
         "objects": results,
         "annotated_image_url": f"/api/detection/image/{task_id}",
+    }
+
+
+@router.get("/models")
+async def list_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取可用的模型版本列表（供检测页面切换模型）"""
+    scene = db.query(DetectionScene).filter(DetectionScene.name == "chest_xray").first()
+    if not scene:
+        return {"models": []}
+
+    versions = (
+        db.query(ModelVersion)
+        .filter(ModelVersion.scene_id == scene.id)
+        .order_by(ModelVersion.created_at.desc())
+        .all()
+    )
+
+    return {
+        "models": [
+            {
+                "id": v.id,
+                "version": v.version,
+                "model_name": v.model_name,
+                "model_type": v.model_type,
+                "map50": v.map50,
+                "map50_95": v.map50_95,
+                "is_default": v.is_default,
+                "created_at": str(v.created_at),
+            }
+            for v in versions
+        ]
     }
 
 
