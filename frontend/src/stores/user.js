@@ -3,6 +3,7 @@
  * 管理用户登录信息、Token、角色等
  */
 import { getUserInfoApi, loginApi } from "@/api/auth";
+import { useAgentStore } from "@/stores/agent";
 import { defineStore } from "pinia";
 
 const TOKEN_KEY = "chestx_token";
@@ -76,6 +77,10 @@ export const useUserStore = defineStore("user", {
       this.user = null;
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
+
+      // 清空智能体聊天记录，防止切换账号看到前一个用户的对话
+      const agentStore = useAgentStore();
+      agentStore.clear();
     },
   },
 });

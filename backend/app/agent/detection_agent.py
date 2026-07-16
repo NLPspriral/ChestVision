@@ -519,17 +519,29 @@ class DetectionAgent:
             return {"output": f"抱歉，处理出错：{str(e)}", "intermediate_steps": []}
 
     async def chat_stream(
-        self, message: str, image_path: Optional[str] = None
+        self,
+        message: str,
+        image_path: Optional[str] = None,
+        chat_history: Optional[list] = None,
     ) -> AsyncGenerator:
-        """流式处理对话消息（用于 SSE）"""
+        """流式处理对话消息（用于 SSE）
+
+        Args:
+            message: 用户消息
+            image_path: 附件图片路径
+            chat_history: 历史消息列表 [HumanMessage, AIMessage, ...]
+        """
         self._ensure_initialized()
         assert self.executor is not None
         if image_path:
             message = f"{message}\n[附件图片路径: {image_path}]"
+
+        invoke_input = {"input": message}
+        if chat_history:
+            invoke_input["chat_history"] = chat_history
+
         try:
-            async for event in self.executor.astream_events(
-                {"input": message}, version="v2"
-            ):
+            async for event in self.executor.astream_events(invoke_input, version="v2"):
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
                     chunk = event["data"].get("chunk")  # type: ignore[typeddict-unknown-key]

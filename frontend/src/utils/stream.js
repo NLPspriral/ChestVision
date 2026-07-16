@@ -89,7 +89,10 @@ function processSSE(message, onMessage) {
       const data = line.slice(6);
       if (data === "[DONE]") return true;
       try {
-        onMessage?.(JSON.parse(data));
+        const parsed = JSON.parse(data);
+        onMessage?.(parsed);
+        // type="done" 事件也表示流结束
+        if (parsed.type === "done") return true;
       } catch {
         onMessage?.({ type: "text_chunk", content: data });
       }

@@ -1,5 +1,50 @@
 <template>
   <div class="chat-page">
+    <!-- 会话侧边栏切换按钮 -->
+    <div class="session-toggle" @click="showSessions = !showSessions">
+      <span>💬</span>
+    </div>
+
+    <!-- 会话侧边栏 -->
+    <div :class="['session-sidebar', { open: showSessions }]">
+      <div class="session-sidebar-header">
+        <h3>对话历史</h3>
+        <el-button size="small" type="primary" @click="startNewChat">
+          + 新对话
+        </el-button>
+      </div>
+      <div class="session-list" v-loading="agentStore.sessionsLoading">
+        <div
+          v-for="s in agentStore.sessions"
+          :key="s.id"
+          :class="[
+            'session-item',
+            { active: s.id === agentStore.currentSessionId },
+          ]"
+          @click="switchToSession(s.id)"
+        >
+          <div class="session-item-title">{{ s.title }}</div>
+          <div class="session-item-meta">
+            <span>{{ s.message_count }} 条消息</span>
+            <el-button
+              size="small"
+              text
+              type="danger"
+              @click.stop="handleDeleteSession(s.id)"
+            >
+              🗑
+            </el-button>
+          </div>
+        </div>
+        <div
+          v-if="!agentStore.sessions.length && !agentStore.sessionsLoading"
+          class="session-empty"
+        >
+          暂无对话历史
+        </div>
+      </div>
+    </div>
+
     <!-- 消息列表 -->
     <div class="message-list" ref="msgListRef">
       <div
@@ -144,7 +189,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useUserStore } from "@/stores/user";
 import request from "@/utils/request";
 import { streamChat } from "@/utils/stream";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import MarkdownIt from "markdown-it";
 import { nextTick, onMounted, ref } from "vue";
 
@@ -158,6 +203,7 @@ const msgListRef = ref(null);
 const fileInputRef = ref(null);
 const selectedPatientId = ref(null);
 const patientList = ref([]);
+const showSessions = ref(false);
 
 function scrollBottom() {
   nextTick(() => {
@@ -294,13 +340,24 @@ async function sendMsg() {
   let fullContent = "";
   const stop = streamChat(
     "/api/chat/stream",
-    { message: text, patient_profile_id: selectedPatientId.value || undefined },
+    {
+      message: text,
+      patient_profile_id: selectedPatientId.value || undefined,
+      session_id: agentStore.currentSessionId || undefined, // 传递会话 ID 实现多轮
+    },
     {
       onMessage: (data) => {
         if (data.type === "text_chunk") {
           fullContent += data.content;
           agentStore.updateLastAssistantMessage(fullContent);
           scrollBottom();
+        } else if (data.type === "done") {
+          // 流结束，记录后端返回的 session_id
+          if (data.session_id) {
+            agentStore.setCurrentSessionId(data.session_id);
+            // 刷新会话列表
+            agentStore.loadSessions();
+          }
         } else if (data.type === "error") {
           const last = agentStore.messages[agentStore.messages.length - 1];
           last.content = data.content;
@@ -418,6 +475,7 @@ async function quickDetect(type) {
 
 onMounted(() => {
   loadPatients();
+  agentStore.loadSessions(); // 加载历史会话列表
   if (agentStore.messages.length === 0) {
     agentStore.addMessage({
       role: "assistant",
@@ -426,6 +484,41 @@ onMounted(() => {
     });
   }
 });
+
+/** 新建对话 */
+function startNewChat() {
+  agentStore.newChat();
+  showSessions.value = false;
+  agentStore.addMessage({
+    role: "assistant",
+    content:
+      "你好！我是**胸片X光AI辅助诊断助手** 🫁\n\n我可以帮你：\n- 📷 上传胸片进行 AI 病灶检测\n- 📁 批量检测多张胸片或 ZIP 包\n- 💬 自然语言分析解读检测结果\n\n---\n*请上传胸片或输入消息开始*",
+  });
+}
+
+/** 切换到历史会话 */
+async function switchToSession(sessionId) {
+  try {
+    await agentStore.switchSession(sessionId);
+    showSessions.value = false;
+    scrollBottom();
+  } catch {
+    ElMessage.error("加载会话失败");
+  }
+}
+
+/** 删除会话 */
+async function handleDeleteSession(sessionId) {
+  try {
+    await ElMessageBox.confirm("确定删除该对话？删除后不可恢复。", "确认删除", {
+      type: "warning",
+    });
+    const ok = await agentStore.deleteSession(sessionId);
+    if (ok) ElMessage.success("已删除");
+  } catch {
+    // 用户取消
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -583,6 +676,98 @@ onMounted(() => {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+// ── 会话侧边栏 ──
+.session-toggle {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 60px;
+  background: $primary-color;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 8px 8px 0;
+  cursor: pointer;
+  z-index: 100;
+  font-size: 16px;
+  transition: left 0.3s;
+  &:hover {
+    background: darken($primary-color, 8%);
+  }
+}
+.session-sidebar {
+  position: fixed;
+  left: -300px;
+  top: 0;
+  width: 280px;
+  height: 100%;
+  background: $bg-white;
+  border-right: 1px solid #eceff4;
+  z-index: 200;
+  transition: left 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.08);
+  &.open {
+    left: 0;
+  }
+  .session-sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid #eceff4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+  }
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .session-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
+    &:hover {
+      background: #f5f7fa;
+    }
+    &.active {
+      background: #e8f4fd;
+      border-left-color: $primary-color;
+    }
+    .session-item-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: $text-primary;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .session-item-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: $text-secondary;
+    }
+  }
+  .session-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: $text-secondary;
+    font-size: 13px;
   }
 }
 </style>
