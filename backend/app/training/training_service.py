@@ -26,6 +26,13 @@ logger = get_logger(__name__)
 
 _running_tasks: dict = {}
 _running_lock = threading.Lock()
+_ALLOWED_YOLO11_MODELS = {"yolo11n", "yolo11s", "yolo11m", "yolo11l", "yolo11x"}
+
+
+def _resolve_yolo11_weight(model_name: str) -> str:
+    if model_name not in _ALLOWED_YOLO11_MODELS:
+        raise ValueError(f"仅支持 yolo11 模型名称：{sorted(_ALLOWED_YOLO11_MODELS)}")
+    return f"{model_name}.pt"
 
 
 class TrainingService:
@@ -34,6 +41,8 @@ class TrainingService:
     @staticmethod
     def start_training(db, user_id: int, scene_id: int, config: dict) -> TrainingTask:
         task_uuid = str(uuid.uuid4())[:8]
+        model_name = config.get("model_name", "yolo11n")
+        _resolve_yolo11_weight(model_name)
 
         data_yaml = config.get("data_yaml")
         dataset_path = config.get("dataset_path", "")
@@ -47,7 +56,7 @@ class TrainingService:
             scene_id=scene_id,
             task_uuid=task_uuid,
             status="pending",
-            model_name=config.get("model_name", "yolo11n"),
+            model_name=model_name,
             epochs=config.get("epochs", 50),
             img_size=config.get("img_size", 640),
             batch_size=config.get("batch_size", 8),
@@ -87,9 +96,12 @@ class TrainingService:
             db.commit()
 
             from ultralytics import YOLO
+            from ultralytics.utils import SETTINGS
+
+            SETTINGS.update(wandb=False)
 
             model_name = config.get("model_name", "yolo11n")
-            model = YOLO(model_name)
+            model = YOLO(_resolve_yolo11_weight(model_name))
 
             with _running_lock:
                 _running_tasks[task_uuid] = model

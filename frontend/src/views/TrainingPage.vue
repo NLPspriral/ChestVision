@@ -194,7 +194,7 @@
       <el-form :model="trainForm" label-width="120px">
         <el-form-item label="检测场景">
           <el-select v-model="trainForm.scene_id" placeholder="选择场景">
-            <el-option label="胸片X光病灶检测" :value="3" />
+            <el-option label="胸片X光病灶检测" :value="1" />
           </el-select>
         </el-form-item>
         <el-form-item label="基础模型">
@@ -511,7 +511,19 @@ async function fetchMetrics() {
     const res = await request.get(`/training/metrics/${taskId}`);
     const metrics = res.metrics || [];
     const statusRes = await request.get(`/training/status/${taskId}`);
-    if (statusRes) selectedTask.value = { ...selectedTask.value, ...statusRes };
+    if (statusRes) {
+      const latestTask = statusRes.task || {};
+      selectedTask.value = {
+        ...selectedTask.value,
+        ...latestTask,
+        latest_metric: statusRes.latest_metric,
+        is_running: statusRes.is_running,
+      };
+      const index = taskList.value.findIndex((task) => task.id === latestTask.id);
+      if (index >= 0) {
+        taskList.value[index] = { ...taskList.value[index], ...latestTask };
+      }
+    }
     if (metrics.length > 0) updateCharts(metrics);
   } catch (e) {
     console.error("获取指标失败", e);
