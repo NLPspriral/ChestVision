@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="$ROOT_DIR/.server-tools"
 UV_BIN="$TOOLS_DIR/uv"
 VENV_DIR="$ROOT_DIR/.venv"
+NODE_DIR="$TOOLS_DIR/node"
 
 mkdir -p "$TOOLS_DIR" "$ROOT_DIR/backend/data" "$ROOT_DIR/logs"
 
@@ -22,7 +23,21 @@ fi
 UV_LINK_MODE=copy "$UV_BIN" pip install --python "$VENV_DIR/bin/python" \
   -r "$ROOT_DIR/backend/requirements.txt"
 
-npm --prefix "$ROOT_DIR/frontend" ci
+if [[ ! -x "$NODE_DIR/bin/node" ]] || [[ "$($NODE_DIR/bin/node -p 'Number(process.versions.node.split(".")[0])')" -lt 22 ]]; then
+  node_archive="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt | awk '/linux-x64.tar.xz$/{print $2; exit}')"
+  node_checksum="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt | awk '/linux-x64.tar.xz$/{print $1; exit}')"
+  curl -fL --retry 3 "https://nodejs.org/dist/latest-v22.x/$node_archive" \
+    -o "$TOOLS_DIR/$node_archive"
+  printf "%s  %s\n" "$node_checksum" "$TOOLS_DIR/$node_archive" | sha256sum -c -
+  rm -rf "$NODE_DIR"
+  mkdir -p "$NODE_DIR"
+  tar -xJf "$TOOLS_DIR/$node_archive" -C "$NODE_DIR" --strip-components=1
+  rm -f "$TOOLS_DIR/$node_archive"
+fi
+
+export PATH="$NODE_DIR/bin:$PATH"
+rm -rf "$ROOT_DIR/frontend/node_modules"
+npm --prefix "$ROOT_DIR/frontend" ci --include=optional
 npm --prefix "$ROOT_DIR/frontend" run build
 
 export DATABASE_URL_OVERRIDE="${DATABASE_URL_OVERRIDE:-sqlite:///$ROOT_DIR/backend/data/chestvision.db}"
