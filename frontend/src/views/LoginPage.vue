@@ -1,24 +1,39 @@
-<template>
+﻿<template>
   <div class="login-page">
+    <div class="bg-glow bg-glow-top"></div>
+    <div class="bg-glow bg-glow-bottom"></div>
+    <div class="page-top-info">
+      <div class="top-logo">🫁</div>
+      <h1 class="top-title">ChestVision</h1>
+      <p class="top-desc">胸片 X 光 智能分析与辅助诊断系统</p>
+    </div>
+    <div class="page-bottom-info">
+      <div class="bottom-item">
+        <span class="bottom-icon">🧠</span
+        ><span>AI 病灶检测 · 14 类胸部病变精准识别</span>
+      </div>
+      <div class="bottom-item">
+        <span class="bottom-icon">💬</span
+        ><span>多 Agent 智能影像报告生成</span>
+      </div>
+      <div class="bottom-item">
+        <span class="bottom-icon">📊</span><span>检测趋势与病灶分布可视化</span>
+      </div>
+    </div>
     <div class="login-card">
-      <!-- 顶部悬浮标题栏（毛玻璃效果） -->
       <div class="card-header">
         <div class="header-inner">
-          <div class="header-icon">
-            <span class="icon-lung">🫁</span>
-          </div>
+          <div class="header-icon"><span class="icon-lung">🫁</span></div>
           <div class="header-text">
-            <h1 class="system-title">胸片X光智能分析系统</h1>
-            <p class="system-desc">基于深度学习的胸部X光影像辅助诊断平台</p>
+            <h1 class="system-title">ChestVision</h1>
+            <p class="system-desc">基于深度学习的胸部 X 光影像辅助诊断平台</p>
           </div>
         </div>
       </div>
-
-      <!-- 左侧：登录表单区 -->
       <div class="fixed-area login-area" :class="{ 'slide-out': !isLogin }">
         <div class="form-content">
           <h2 class="form-title">登录</h2>
-          <p class="or-text">使用您的账号密码登录</p>
+          <p class="form-sub">使用您的账号密码登录</p>
           <el-form
             ref="loginFormRef"
             :model="loginForm"
@@ -27,56 +42,47 @@
             size="large"
             @submit.prevent="handleLogin"
           >
-            <el-form-item prop="username">
-              <el-input
+            <el-form-item prop="username"
+              ><el-input
                 v-model="loginForm.username"
-                placeholder="用户名"
+                placeholder="邮箱 / 工号"
                 prefix-icon="User"
-              />
-            </el-form-item>
-            <el-form-item prop="password">
-              <el-input
+            /></el-form-item>
+            <el-form-item prop="password"
+              ><el-input
                 v-model="loginForm.password"
                 type="password"
                 placeholder="密码"
                 prefix-icon="Lock"
                 show-password
-              />
-            </el-form-item>
-            <el-form-item>
-              <div class="form-options">
-                <el-checkbox v-model="rememberMe" class="remember-checkbox"
-                  >记住我</el-checkbox
-                >
-                <el-button
-                  link
-                  type="primary"
-                  class="forgot-link"
-                  native-type="button"
-                  @click="handleForgotPassword"
-                  >忘记密码？</el-button
-                >
-              </div>
-            </el-form-item>
-            <el-form-item>
+                @keyup.enter="handleLogin"
+            /></el-form-item>
+            <div class="form-options">
+              <el-checkbox v-model="rememberMe">记住我</el-checkbox>
               <el-button
+                link
+                class="forgot-link"
+                native-type="button"
+                @click="handleForgotPassword"
+                >忘记密码？</el-button
+              >
+            </div>
+            <el-form-item
+              ><el-button
                 type="primary"
-                class="login-btn"
+                class="submit-btn"
                 :loading="loading"
                 @click="handleLogin"
-                round
-                >登录</el-button
-              >
-            </el-form-item>
+                >登录系统</el-button
+              ></el-form-item
+            >
           </el-form>
         </div>
       </div>
-
-      <!-- 右侧：注册表单区 -->
       <div class="fixed-area register-area" :class="{ 'slide-out': isLogin }">
         <div class="form-content">
           <h2 class="form-title">创建账号</h2>
-          <p class="or-text">使用您的邮箱注册</p>
+          <p class="form-sub">注册后即可使用全部功能</p>
           <el-form
             ref="registerFormRef"
             :model="registerForm"
@@ -85,20 +91,18 @@
             size="large"
             @submit.prevent="handleRegister"
           >
-            <el-form-item prop="name">
-              <el-input
+            <el-form-item prop="name"
+              ><el-input
                 v-model="registerForm.name"
                 placeholder="姓名"
                 prefix-icon="User"
-              />
-            </el-form-item>
-            <el-form-item prop="email">
-              <el-input
+            /></el-form-item>
+            <el-form-item prop="email"
+              ><el-input
                 v-model="registerForm.email"
                 placeholder="邮箱"
                 prefix-icon="Message"
-              />
-            </el-form-item>
+            /></el-form-item>
             <el-form-item prop="userType">
               <el-select
                 v-model="registerForm.userType"
@@ -107,64 +111,60 @@
                 :teleported="false"
               >
                 <el-option
-                  label="👤 病人 — 上传个人胸片、查看报告"
+                  label="病人 — 上传个人胸片、查看报告"
                   value="patient"
                 />
                 <el-option
-                  label="👨‍⚕️ 医生 — 管理病人、编辑病例、分析诊断"
+                  label="医生 — 管理病人、编辑病例、分析诊断"
                   value="doctor"
                 />
                 <el-option
-                  label="⚙️ 管理员 — 系统管理、分配医患关系"
+                  label="管理员 — 系统管理、分配医患关系"
                   value="admin"
                 />
               </el-select>
             </el-form-item>
-            <el-form-item prop="password">
-              <el-input
+            <el-form-item prop="password"
+              ><el-input
                 v-model="registerForm.password"
                 type="password"
-                placeholder="密码"
+                placeholder="密码（至少6位）"
                 prefix-icon="Lock"
                 show-password
-              />
-            </el-form-item>
-            <el-form-item prop="confirmPassword">
-              <el-input
+            /></el-form-item>
+            <el-form-item prop="confirmPassword"
+              ><el-input
                 v-model="registerForm.confirmPassword"
                 type="password"
                 placeholder="确认密码"
                 prefix-icon="Lock"
                 show-password
-              />
-            </el-form-item>
-            <el-form-item>
-              <el-button
+                @keyup.enter="handleRegister"
+            /></el-form-item>
+            <el-form-item
+              ><el-button
                 type="primary"
-                class="register-btn"
+                class="submit-btn register-btn"
                 :loading="registering"
                 @click="handleRegister"
-                round
                 >注册</el-button
-              >
-            </el-form-item>
+              ></el-form-item
+            >
           </el-form>
         </div>
       </div>
-
-      <!-- 滑动遮罩层：默认覆盖右侧注册区，点击后滑到左侧覆盖登录区 -->
       <div class="overlay-panel" :class="{ 'slide-left': !isLogin }">
-        <div class="overlay-bg bg-green" :class="{ hidden: !isLogin }"></div>
-        <div class="overlay-bg bg-purple" :class="{ hidden: isLogin }"></div>
+        <div class="overlay-bg bg-login" :class="{ hidden: !isLogin }"></div>
+        <div class="overlay-bg bg-register" :class="{ hidden: isLogin }"></div>
         <div class="overlay-content">
-          <div class="guide-text login-guide" :class="{ hidden: !isLogin }">
+          <div class="guide-text" :class="{ hidden: !isLogin }">
             <h2>你好，朋友！</h2>
             <p>注册您的个人信息以使用网站的全部功能</p>
             <el-button class="guide-btn" round @click="toggleLogin"
               >注册</el-button
             >
           </div>
-          <div class="guide-text register-guide" :class="{ hidden: isLogin }">
+          <div class="guide-text" :class="{ hidden: isLogin }">
             <h2>欢迎回来！</h2>
             <p>输入您的个人信息以使用网站的全部功能</p>
             <el-button class="guide-btn" round @click="toggleLogin"
@@ -173,48 +173,44 @@
           </div>
         </div>
       </div>
-
-      <!-- 忘记密码弹窗 -->
-      <el-dialog
-        v-model="forgotVisible"
-        title="重置密码"
-        width="400px"
-        :close-on-click-modal="false"
-        center
-      >
-        <el-form
-          ref="forgotFormRef"
-          :model="forgotForm"
-          :rules="forgotRules"
-          label-width="0"
-          @submit.prevent="handleForgotSubmit"
-        >
-          <el-form-item prop="username">
-            <el-input
-              v-model="forgotForm.username"
-              placeholder="请输入用户名"
-              prefix-icon="User"
-            />
-          </el-form-item>
-          <el-form-item prop="email">
-            <el-input
-              v-model="forgotForm.email"
-              placeholder="请输入注册邮箱"
-              prefix-icon="Message"
-            />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="forgotVisible = false">取消</el-button>
-          <el-button
-            type="primary"
-            :loading="forgotLoading"
-            @click="handleForgotSubmit"
-            >发送重置链接</el-button
-          >
-        </template>
-      </el-dialog>
     </div>
+    <el-dialog
+      v-model="forgotVisible"
+      title="重置密码"
+      width="400px"
+      :close-on-click-modal="false"
+      center
+    >
+      <el-form
+        ref="forgotFormRef"
+        :model="forgotForm"
+        :rules="forgotRules"
+        label-width="0"
+        @submit.prevent="handleForgotSubmit"
+      >
+        <el-form-item prop="username"
+          ><el-input
+            v-model="forgotForm.username"
+            placeholder="请输入用户名"
+            prefix-icon="User"
+        /></el-form-item>
+        <el-form-item prop="email"
+          ><el-input
+            v-model="forgotForm.email"
+            placeholder="请输入注册邮箱"
+            prefix-icon="Message"
+        /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="forgotVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="forgotLoading"
+          @click="handleForgotSubmit"
+          >发送重置链接</el-button
+        >
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -267,7 +263,6 @@ function toggleLogin() {
   isLogin.value = !isLogin.value;
 }
 
-// ── 忘记密码 ──
 const forgotVisible = ref(false);
 const forgotLoading = ref(false);
 const forgotFormRef = ref(null);
@@ -298,8 +293,7 @@ async function handleForgotSubmit() {
     ElMessage.success("重置链接已发送，请查收邮件");
     forgotVisible.value = false;
   } catch (err) {
-    const msg = err?.response?.data?.detail || "操作失败";
-    ElMessage.error(msg);
+    ElMessage.error(err?.response?.data?.detail || "操作失败");
   } finally {
     forgotLoading.value = false;
   }
@@ -364,112 +358,167 @@ async function handleRegister() {
 </script>
 
 <style scoped>
-/* ========== 颜色变量 ========== */
 .login-page {
-  --login: #1b9e7e;
-  --login-l: #2dcdb0;
-  --login-d: #0f594b;
-  --login-h: #15876c;
-  --login-hl: #25b89b;
-  --reg: #6c3cb0;
-  --reg-l: #9f6bdb;
-  --reg-d: #46247a;
-  --reg-h: #5b2f99;
-  --reg-hl: #8a58c9;
-
+  --accent: #56d4c1;
+  --accent-d: #3ab8a5;
+  --card-bg: #181c26;
+  --input-bg: #1e2230;
+  --text-main: #e0e3ea;
+  --text-sub: #6b7084;
+  --border: rgba(255, 255, 255, 0.06);
   position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f7fb;
-  padding: 20px;
-  box-sizing: border-box;
+  background: #0f1219;
   z-index: 1000;
-}
-
-/* ========== 卡片容器 ========== */
-.login-card {
-  position: relative;
-  width: 1000px;
-  max-width: 100%;
-  min-height: 680px;
-  background: #fff;
-  border-radius: 32px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
   overflow: hidden;
 }
 
-/* ========== 顶部毛玻璃标题栏 ========== */
+.bg-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.15;
+  pointer-events: none;
+}
+.bg-glow-top {
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  left: -100px;
+  background: radial-gradient(circle, #56d4c1, transparent);
+}
+.bg-glow-bottom {
+  width: 500px;
+  height: 500px;
+  bottom: -180px;
+  right: -120px;
+  background: radial-gradient(circle, #6a5acd, transparent);
+}
+
+.page-top-info {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  z-index: 1;
+}
+.top-logo {
+  font-size: 36px;
+  margin-bottom: 6px;
+}
+.top-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: #e8eaf0;
+  margin: 0 0 6px;
+  letter-spacing: 0.5px;
+}
+.top-desc {
+  font-size: 13px;
+  color: #5c6175;
+  margin: 0;
+}
+
+.page-bottom-info {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 32px;
+  z-index: 1;
+}
+.bottom-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #5c6175;
+}
+.bottom-icon {
+  font-size: 16px;
+}
+
+.login-card {
+  position: relative;
+  width: 900px;
+  max-width: 96vw;
+  min-height: 560px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  z-index: 2;
+}
+
 .card-header {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 90px;
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  height: 72px;
+  background: rgba(24, 28, 38, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   z-index: 15;
   display: flex;
   align-items: center;
-  padding: 0 40px;
+  padding: 0 32px;
   box-sizing: border-box;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid var(--border);
 }
 .header-inner {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   width: 100%;
 }
 .header-icon {
   flex-shrink: 0;
-  width: 52px;
-  height: 52px;
-  background: linear-gradient(135deg, var(--login), var(--login-l));
-  border-radius: 16px;
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, var(--accent-d), var(--accent));
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(27, 158, 126, 0.3);
 }
 .icon-lung {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
 }
 .header-text {
   display: flex;
   flex-direction: column;
-  justify-content: center;
 }
 .system-title {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--text-main);
   margin: 0;
   letter-spacing: -0.3px;
-  line-height: 1.3;
 }
 .system-desc {
-  font-size: 13px;
-  color: #666;
-  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-sub);
+  margin: 2px 0 0;
 }
 
-/* ========== 左右表单区 ========== */
 .fixed-area {
   position: absolute;
-  top: 90px;
-  height: calc(100% - 90px);
+  top: 72px;
+  height: calc(100% - 72px);
   width: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 30px 40px 40px;
+  padding: 28px 36px 36px;
   box-sizing: border-box;
-  background: #fff;
   z-index: 1;
   overflow: hidden;
 }
@@ -478,123 +527,130 @@ async function handleRegister() {
 }
 .register-area {
   left: 50%;
-  border-left: 2px solid rgba(224, 229, 236, 0.5);
+  border-left: 1px solid var(--border);
 }
 
-/* 表单内容：向外滑出（不重叠） */
 .form-content {
   width: 100%;
-  max-width: 340px;
-  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 310px;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   transform: translateX(0);
 }
-/* 登录区隐藏时 → 向左滑出卡片 */
 .login-area.slide-out .form-content {
   transform: translateX(-120%);
 }
-/* 注册区隐藏时 → 向右滑出卡片 */
 .register-area.slide-out .form-content {
   transform: translateX(120%);
 }
 
 .form-title {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
-  color: #1a1a1a;
-  margin-bottom: 8px;
-  letter-spacing: -0.5px;
+  color: var(--text-main);
+  margin-bottom: 6px;
 }
-.or-text {
-  color: #8a8f99;
-  font-size: 14px;
-  margin-bottom: 28px;
+.form-sub {
+  font-size: 13px;
+  color: var(--text-sub);
+  margin-bottom: 24px;
 }
 
-/* 记住我 / 忘记密码 */
 .form-options {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: -4px 0 18px 0;
-  height: 32px;
+  margin: -6px 0 18px;
 }
-.remember-checkbox {
-  --el-checkbox-font-size: 13px;
+.form-options :deep(.el-checkbox__label) {
+  color: var(--text-sub);
+  font-size: 13px;
 }
-.remember-checkbox :deep(.el-checkbox__label) {
-  color: #666;
+.form-options :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: var(--accent);
+  border-color: var(--accent);
 }
 .forgot-link {
   font-size: 13px;
+  color: var(--text-sub);
   padding: 0;
   height: auto;
-  line-height: 32px;
+}
+.forgot-link:hover {
+  color: var(--accent);
 }
 
-/* ========== 输入框焦点样式 ========== */
-:deep(.el-input__wrapper) {
-  transition: all 0.3s ease;
-  border-radius: 8px;
-}
-.login-area :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 2px var(--login);
-  transform: translateY(-1px);
-}
-.register-area :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 2px var(--reg);
-  transform: translateY(-1px);
-}
-.login-area :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-  background-color: var(--login);
-  border-color: var(--login);
-}
-.login-area :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
-  color: var(--login);
-}
-
-/* ========== 按钮 ========== */
-.login-btn,
-.register-btn {
+.submit-btn {
   width: 100%;
-  height: 48px;
-  font-size: 16px;
+  height: 46px;
+  font-size: 15px;
   font-weight: 600;
   border: none;
-  border-radius: 40px;
-  transition: all 0.25s ease;
-}
-.login-btn {
-  background: linear-gradient(135deg, var(--login), var(--login-l));
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-d), var(--accent));
   color: #fff;
+  letter-spacing: 0.5px;
+  transition: all 0.25s;
+  box-shadow: 0 4px 18px rgba(86, 212, 193, 0.25);
 }
-.login-btn:hover {
-  transform: scale(0.96);
-  background: linear-gradient(135deg, var(--login-h), var(--login-hl));
+.submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(86, 212, 193, 0.35);
 }
-.login-btn:active {
-  transform: scale(0.92);
+.submit-btn:active {
+  transform: translateY(0);
 }
 .register-btn {
-  background: linear-gradient(135deg, var(--reg), var(--reg-l));
-  color: #fff;
+  background: linear-gradient(135deg, #5b3fcf, #7b5fe0);
+  box-shadow: 0 4px 18px rgba(123, 95, 224, 0.25);
 }
 .register-btn:hover {
-  transform: scale(0.96);
-  background: linear-gradient(135deg, var(--reg-h), var(--reg-hl));
-}
-.register-btn:active {
-  transform: scale(0.92);
+  box-shadow: 0 6px 24px rgba(123, 95, 224, 0.35);
 }
 
-/* ========== 滑动遮罩层 ========== */
+:deep(.el-input__wrapper) {
+  background: var(--input-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  transition: all 0.25s;
+}
+:deep(.el-input__wrapper:hover) {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+.login-area :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(86, 212, 193, 0.1) !important;
+}
+.register-area :deep(.el-input__wrapper.is-focus) {
+  border-color: #7b5fe0 !important;
+  box-shadow: 0 0 0 3px rgba(123, 95, 224, 0.1) !important;
+}
+:deep(.el-input__inner) {
+  color: #c8cdd8;
+  font-size: 14px;
+}
+:deep(.el-input__inner::placeholder) {
+  color: #4a4f60;
+}
+:deep(.el-input__prefix),
+:deep(.el-input__suffix) {
+  color: #4a4f60;
+}
+:deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+:deep(.el-select .el-input__wrapper) {
+  background: var(--input-bg) !important;
+}
+
 .overlay-panel {
   position: absolute;
-  top: 90px;
+  top: 72px;
   width: 50%;
-  height: calc(100% - 90px);
+  height: calc(100% - 72px);
   left: 50%;
   z-index: 10;
-  transition: left 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .overlay-panel.slide-left {
@@ -604,14 +660,13 @@ async function handleRegister() {
 .overlay-bg {
   position: absolute;
   inset: 0;
-  transition: opacity 0.45s ease;
-  will-change: opacity;
+  transition: opacity 0.4s ease;
 }
-.bg-green {
-  background: linear-gradient(135deg, var(--login-d), var(--login-l));
+.bg-login {
+  background: linear-gradient(135deg, #1a5c4e, #2a8c7a);
 }
-.bg-purple {
-  background: linear-gradient(135deg, var(--reg-d), var(--reg-l));
+.bg-register {
+  background: linear-gradient(135deg, #3b286e, #5b3fcf);
 }
 .overlay-bg.hidden {
   opacity: 0;
@@ -630,97 +685,103 @@ async function handleRegister() {
   position: absolute;
   text-align: center;
   color: #fff;
-  max-width: 260px;
+  max-width: 240px;
   padding: 20px;
   transition:
-    opacity 0.35s ease,
+    opacity 0.35s,
     visibility 0.35s;
-  visibility: visible;
   opacity: 1;
+  visibility: visible;
 }
 .guide-text.hidden {
   opacity: 0;
   visibility: hidden;
 }
 .guide-text h2 {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .guide-text p {
-  font-size: 16px;
+  font-size: 14px;
   opacity: 0.85;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   line-height: 1.6;
 }
 
 .guide-btn {
   background: transparent;
-  border: 2px solid rgba(255, 255, 255, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.5);
   color: #fff;
-  padding: 12px 40px;
-  font-size: 16px;
+  padding: 10px 36px;
+  font-size: 14px;
   font-weight: 600;
   border-radius: 40px;
-  transition: all 0.3s ease;
+  transition: all 0.3s;
 }
 .guide-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.12);
   border-color: #fff;
-  transform: scale(0.96);
-}
-.guide-btn:active {
-  transform: scale(0.92);
 }
 
-/* 下拉框浮层修复 */
-.el-select-dropdown {
-  z-index: 3000 !important;
-}
+.el-select-dropdown,
 .el-popper.is-pure {
   z-index: 3000 !important;
 }
 
-/* ========== 移动端 ========== */
 @media (max-width: 768px) {
+  .page-top-info {
+    top: 20px;
+  }
+  .top-title {
+    font-size: 20px;
+  }
+  .page-bottom-info {
+    display: none;
+  }
+  .bg-glow {
+    display: none;
+  }
   .login-card {
     min-height: auto;
-    border-radius: 24px;
+    border-radius: 20px;
   }
   .card-header {
-    height: 70px;
-    padding: 0 20px;
+    height: 58px;
+    padding: 0 18px;
   }
   .header-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
   }
   .icon-lung {
-    font-size: 22px;
-  }
-  .system-title {
     font-size: 18px;
   }
+  .system-title {
+    font-size: 15px;
+  }
   .system-desc {
-    font-size: 11px;
+    font-size: 10px;
   }
   .fixed-area {
-    top: 70px;
-    height: calc(100% - 70px);
+    top: 58px;
+    height: calc(100% - 58px);
     position: relative;
     width: 100%;
-    height: auto;
-    min-height: 320px;
     left: 0 !important;
     border-left: none !important;
-    padding: 30px 24px;
+    padding: 24px 20px;
   }
   .register-area {
-    border-top: 1px solid #eee;
+    border-top: 1px solid var(--border);
   }
   .overlay-panel {
     display: none;
+  }
+  .form-content {
+    transform: none !important;
+    max-width: 100%;
   }
 }
 </style>

@@ -916,17 +916,29 @@ async function exportModel() {
 }
 
 // 【Day 7 新增】模型操作：下载
-function downloadModel() {
+async function downloadModel() {
   if (!selectedTask.value) return;
   const taskId = selectedTask.value.id || selectedTask.value.task?.id;
-  const token = localStorage.getItem("token") || "";
-  const url = `/api/training/download/${taskId}`;
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const token = localStorage.getItem("chestx_token") || "";
+  try {
+    const response = await fetch(`/api/training/download/${taskId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      throw new Error("下载失败");
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedTask.value.model_name}_${selectedTask.value.task_uuid}_best.pt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error("下载失败");
+  }
 }
 
 // 【Day 7 新增】测试图验证：选择文件

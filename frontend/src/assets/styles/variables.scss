@@ -14,10 +14,17 @@ $info-color: #8C8C8C;
 // ── 背景色 ──────────────────────────────────────────
 $bg-color: #F0F4F8;            // 冷灰白（替代纯白背景）
 $bg-white: #FFFFFF;
-$sidebar-bg: #FFFFFF;          // 浅色侧边栏
-$sidebar-text: #595959;
-$sidebar-active-text: $primary-color;
-$sidebar-active-bg: #E6F7F5;   // 选中背景
+// ── 侧边栏（深色主题）──────────────────────────
+$sidebar-bg: #1a1f2e;          // 深海军蓝背景
+$sidebar-text: #8b8fa3;        // 菜单文字
+$sidebar-text-hover: #e0e2ea;  // 悬停文字
+$sidebar-active-text: #56d4c1; // 激活文字（青绿高亮）
+$sidebar-active-bg: rgba(86, 212, 193, 0.1);  // 激活背景
+$sidebar-active-bar: #56d4c1;  // 激活左侧指示条
+$sidebar-logo-bg: rgba(255,255,255,0.04);      // Logo区背景
+$sidebar-divider: rgba(255,255,255,0.06);       // 分割线
+$sidebar-footer-bg: rgba(0,0,0,0.15);           // 底部区域
+$sidebar-collapse-hover: rgba(255,255,255,0.08); // 折叠按钮悬停
 
 // ── 文字色 ──────────────────────────────────────────
 $text-primary: #2C3E50;
