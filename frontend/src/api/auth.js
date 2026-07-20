@@ -34,3 +34,45 @@ export function getUserInfoApi() {
 export function forgotPasswordApi(data) {
   return request.post("/auth/forgot-password", data);
 }
+
+// ══════════════════════════════════════════════════════
+// 个人中心
+// ══════════════════════════════════════════════════════
+
+/**
+ * 更新个人基本信息
+ * @param {Object} data - { username?, email?, phone?, avatar? }
+ */
+export function updateProfileApi(data) {
+  return request.put("/profile/me", data);
+}
+
+/**
+ * 修改密码
+ * @param {Object} data - { old_password, new_password }
+ */
+export function changePasswordApi(data) {
+  return request.put("/profile/me/password", data);
+}
+
+/**
+ * 获取我的患者档案
+ */
+export function getPatientProfileApi() {
+  return request.get("/profile/me/patient-profile");
+}
+
+/**
+ * 更新我的患者档案
+ * @param {Object} data
+ */
+export function updatePatientProfileApi(data) {
+  return request.put("/profile/me/patient-profile", data);
+}
+
+/**
+ * 获取个人中心统计数据
+ */
+export function getProfileStatsApi() {
+  return request.get("/profile/stats");
+}

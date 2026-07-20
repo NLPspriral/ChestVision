@@ -12,7 +12,7 @@ Pydantic 请求/响应模型
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Yolo11ModelName = Literal["yolo11n", "yolo11s", "yolo11m", "yolo11l", "yolo11x"]
 ModelDataSplit = Literal["train", "val", "test"]
@@ -78,6 +78,7 @@ class UserResponse(BaseModel):
     email: str
     phone: Optional[str] = None
     avatar: Optional[str] = None
+    user_type: str = "patient"
     is_active: bool
     is_superuser: bool
     roles: list[str] = []
@@ -90,11 +91,20 @@ class UserResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """用户信息更新"""
+    """用户信息更新（管理员用）"""
 
     phone: Optional[str] = None
     avatar: Optional[str] = None
     email: Optional[str] = None
+
+
+class UserProfileUpdate(BaseModel):
+    """个人中心 - 更新自己的基本信息"""
+
+    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    avatar: Optional[str] = None
 
 
 class ChangePassword(BaseModel):
@@ -102,6 +112,64 @@ class ChangePassword(BaseModel):
 
     old_password: str = Field(..., description="旧密码")
     new_password: str = Field(..., min_length=6, max_length=100, description="新密码")
+
+
+# --- 患者健康档案（个人中心用）---
+
+class PatientProfileResponse(BaseModel):
+    """患者档案响应"""
+
+    id: int
+    user_id: int
+    patient_code: str
+    real_name: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    birth_date: Optional[datetime] = None
+    blood_type: Optional[str] = None
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
+    allergies: Optional[str] = None
+    department: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+
+class PatientProfileUpdate(BaseModel):
+    """患者更新自己的档案"""
+
+    real_name: Optional[str] = None
+    age: Optional[int] = Field(None, ge=0, le=150)
+    gender: Optional[str] = None
+    birth_date: Optional[datetime] = None
+    blood_type: Optional[str] = None
+    height_cm: Optional[float] = Field(None, ge=0, le=300)
+    weight_kg: Optional[float] = Field(None, ge=0, le=500)
+    allergies: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    emergency_phone: Optional[str] = None
+
+
+class DoctorProfileStats(BaseModel):
+    """医生个人中心统计"""
+    patient_count: int = 0
+    total_detections: int = 0
+    total_records: int = 0
+
+
+class AdminProfileStats(BaseModel):
+    """管理员个人中心统计"""
+    total_users: int = 0
+    total_patients: int = 0
+    total_doctors: int = 0
+    total_detections: int = 0
+    total_models: int = 0
 
 
 # --- 角色权限 ---
@@ -180,7 +248,7 @@ class SceneResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
+        protected_namespaces = ()
 
 # --- 检测任务 ---
 
@@ -206,6 +274,7 @@ class DetectionTaskResponse(BaseModel):
 
     class Config:
         from_attributes = True
+        protected_namespaces = ()
 
 
 class DetectionResultResponse(BaseModel):
@@ -274,6 +343,8 @@ class TrainingTaskCreate(BaseModel):
     lr0: float = Field(default=0.01, description="初始学习率")
     augment_config: Optional[dict] = Field(None, description="数据增强配置")
 
+    model_config = ConfigDict(protected_namespaces=())
+
 
 class TrainingTaskResponse(BaseModel):
     """训练任务响应"""
@@ -299,6 +370,7 @@ class TrainingTaskResponse(BaseModel):
 
     class Config:
         from_attributes = True
+        protected_namespaces = ()
 
 
 class TrainingMetricResponse(BaseModel):
@@ -334,6 +406,7 @@ class ModelVersionBrief(BaseModel):
 
     class Config:
         from_attributes = True
+        protected_namespaces = ()
 
 
 class ModelVersionResponse(BaseModel):
@@ -361,6 +434,7 @@ class ModelVersionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+        protected_namespaces = ()
 
 
 class ModelVersionCreate(BaseModel):
@@ -371,6 +445,8 @@ class ModelVersionCreate(BaseModel):
     model_name: str = Field(..., description="模型名称")
     model_type: Yolo11ModelName = Field(default="yolo11n", description="模型类型")
     description: Optional[str] = None
+
+    model_config = ConfigDict(protected_namespaces=())
 
 
 # --- 模型评估与导出（Day 7 新增）---

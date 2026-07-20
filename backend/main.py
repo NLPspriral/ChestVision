@@ -7,8 +7,10 @@ from app.api.detection import router as detection_router
 from app.api.health import router as health_router
 from app.api.medical_record import router as medical_record_router
 from app.api.patient import router as patient_router
+from app.api.profile import router as profile_router
 from app.api.report import router as report_router
 from app.api.training import router as training_router  # 训练 API 路由
+from app.api.knowledge import router as knowledge_router  # Day11: 知识库管理 API
 from app.config.settings import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.request_logger import RequestLogMiddleware
@@ -75,6 +77,8 @@ app.include_router(patient_router)  # 注册患者管理 API 路由
 app.include_router(medical_record_router)  # 注册病例管理 API 路由
 app.include_router(dashboard_router)  # 注册数据看板 API 路由
 app.include_router(report_router)  # 注册检测报告 API 路由
+app.include_router(profile_router)  # 注册个人中心 API 路由
+app.include_router(knowledge_router)  # Day11: 注册知识库管理 API 路由
 
 
 @app.get("/")

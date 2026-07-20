@@ -4,6 +4,8 @@
 加载优先级：环境变量（系统级别）> .env 文件 > 代码中的默认值
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -77,15 +79,23 @@ class Settings(BaseSettings):
     QWEN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     QWEN_MODEL: str = "qwen-plus"
 
+    # ── RAG / Embedding 配置（Day 11 新增）─────────────
+    EMBEDDING_MODEL: str = "text-embedding-v3"   # 通义千问 Embedding 模型
+    EMBEDDING_DIM: int = 1024                     # 向量维度（text-embedding-v3=1024）
+    RAG_CHUNK_SIZE: int = 500                     # 文档分块大小
+    RAG_CHUNK_OVERLAP: int = 50                   # 分块重叠字符数
+    RAG_TOP_K: int = 3                            # 检索返回 Top-K 条
+
     @property
     def cors_origins_list(self) -> list:
         """将 CORS 配置字符串转为列表"""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     class Config:
-        env_file = ".env"
+        # 始终从 backend/.env 加载，不受 CWD 影响
+        env_file = str(Path(__file__).resolve().parent.parent.parent / ".env")
         env_file_encoding = "utf-8"
-        extra = "ignore"  # 加这行，忽略 .env 中未定义的字段
+        extra = "ignore"
 
 
 # 创建全局单例，其他模块直接 import 使用
