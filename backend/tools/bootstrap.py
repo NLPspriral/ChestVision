@@ -8,6 +8,10 @@ from datetime import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
 from app.core.security import hash_password
 from app.database.session import Base, SessionLocal, engine
 from app.entity import db_models  # noqa: F401
@@ -120,6 +124,12 @@ def main() -> None:
             admin.is_active = True
             admin.is_superuser = True
             admin.user_type = "admin"
+            if os.getenv("RESET_DEFAULT_ADMIN_PASSWORD", "false").lower() in {
+                "1",
+                "true",
+                "yes",
+            }:
+                admin.hashed_password = hash_password(password)
 
         if os.getenv("SEED_DEMO_DOCTORS", "false").lower() in {
             "1",

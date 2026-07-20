@@ -9,6 +9,13 @@ CLOUDFLARED="$TOOLS_DIR/cloudflared"
 
 mkdir -p "$TOOLS_DIR" "$LOG_DIR" "$RUN_DIR" "$ROOT_DIR/backend/data"
 
+proxy_url="${CHESTVISION_PROXY_URL:-$(sed -n 's/^CHESTVISION_PROXY_URL=//p' "$ROOT_DIR/backend/.env" 2>/dev/null | tail -1)}"
+if [[ -n "$proxy_url" ]]; then
+  export http_proxy="$proxy_url" https_proxy="$proxy_url"
+  export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
+  export NO_PROXY="127.0.0.1,localhost"
+fi
+
 export DATABASE_URL_OVERRIDE="${DATABASE_URL_OVERRIDE:-sqlite:///$ROOT_DIR/backend/data/chestvision.db}"
 if [[ ! -f "$RUN_DIR/backend.pid" ]] || ! kill -0 "$(cat "$RUN_DIR/backend.pid")" 2>/dev/null; then
   nohup setsid env DATABASE_URL_OVERRIDE="$DATABASE_URL_OVERRIDE" \
