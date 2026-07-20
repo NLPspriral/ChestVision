@@ -19,7 +19,9 @@ if [[ ! -x "$UV_BIN" ]]; then
   rm -rf "$TOOLS_DIR"/uv-* "$archive"
 fi
 
-"$UV_BIN" venv "$VENV_DIR" --python python3
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+  "$UV_BIN" venv "$VENV_DIR" --python python3
+fi
 UV_LINK_MODE=copy "$UV_BIN" pip install --python "$VENV_DIR/bin/python" \
   -r "$ROOT_DIR/backend/requirements.txt"
 
