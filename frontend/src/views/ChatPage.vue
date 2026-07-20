@@ -88,6 +88,48 @@
                 >
               </div>
             </div>
+
+            <!-- 工具调用可视化 -->
+            <div
+              v-if="msg.toolCalls && msg.toolCalls.length"
+              class="tool-calls-area"
+            >
+              <div
+                v-for="(tc, idx) in msg.toolCalls"
+                :key="idx"
+                class="tool-call-row"
+                :class="{ loading: tc.status === 'loading' }"
+              >
+                <span v-if="tc.status === 'loading'" class="tool-spinner"
+                  >⏳</span
+                >
+                <span v-else class="tool-done">✅</span>
+                <span class="tool-label">{{ getToolLabel(tc.tool) }}</span>
+                <span class="tool-summary">{{ tc.summary || "..." }}</span>
+              </div>
+            </div>
+
+            <!-- 知识来源显示 -->
+            <div
+              v-if="msg.knowledgeSources && msg.knowledgeSources.length"
+              class="knowledge-sources-info"
+            >
+              <span class="kb-icon">📚</span>
+              <span class="kb-label">知识库检索结果：</span>
+              <span
+                v-for="(src, idx) in msg.knowledgeSources"
+                :key="idx"
+                class="kb-source-tag"
+                >{{ src.title || src.source }}</span
+              >
+            </div>
+            <div
+              v-else-if="msg.hasKnowledge === false"
+              class="knowledge-sources-info no-kb"
+            >
+              <span class="kb-icon">💡</span>
+              <span>回答来自大模型（知识库暂无相关内容）</span>
+            </div>
           </div>
         </div>
       </div>
@@ -169,7 +211,6 @@
 <script setup>
 import { detectBatch, detectSingle, detectZip } from "@/api/detection";
 import { getPatients } from "@/api/patient";
-import DetectionResultCard from "@/components/DetectionResultCard.vue";
 import { useAgentStore } from "@/stores/agent";
 import { useUserStore } from "@/stores/user";
 import request from "@/utils/request";
@@ -345,6 +386,12 @@ async function sendMsg() {
     },
     {
       onMessage: (data) => {
+        console.log(
+          "[SSE]",
+          data.type,
+          data.tool ? `tool=${data.tool}` : "",
+          data.knowledge_sources ? "有知识来源" : "",
+        );
         const last = agentStore.messages[agentStore.messages.length - 1];
         if (data.type === "text_chunk") {
           fullContent += data.content;
@@ -881,6 +928,71 @@ async function handleDeleteSession(sessionId) {
   padding: 12px 40px 20px;
   background: #fff;
   border-top: 1px solid #f0f2f5;
+}
+
+.tool-calls-area {
+  margin-top: 10px;
+}
+
+.tool-call-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #f8fafb;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: $text-regular;
+  &.loading {
+    opacity: 0.7;
+  }
+}
+
+.tool-spinner,
+.tool-done {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.tool-label {
+  font-weight: 600;
+  color: $primary-dark;
+}
+.tool-summary {
+  color: $text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-sources-info {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #f0fdfa;
+  border-radius: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  &.no-kb {
+    background: #fffbeb;
+  }
+}
+
+.kb-icon {
+  font-size: 14px;
+}
+.kb-label {
+  color: $text-secondary;
+}
+.kb-source-tag {
+  background: #e6f7f5;
+  color: $primary-dark;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .quick-actions {
