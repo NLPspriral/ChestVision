@@ -16,7 +16,7 @@ openai==1.50.0  # OpenAI API SDK
 ollama==0.3.0  #本地 LLM 模型备选
 # ── ⽬标检测（YOLOv11）────────────────────────────────
 ultralytics==8.3.0   # Ultralytics YOLO框架（包含PyTorch）
-numpy==1.26.0  # 科学计算基础库（图像数据处理、坐标计算等）
+numpy==1.26.4  # 科学计算基础库（图像数据处理、坐标计算等）
 opencv-python==4.8.0.76 # OpenCV图像处理库
 Pillow==10.0.0   # Pillow图像处理库
 # ── 数据库（PostgreSQL + ORM）─────────────────────────

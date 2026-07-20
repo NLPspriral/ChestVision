@@ -111,6 +111,32 @@
               >🔧 {{ msg.toolCall.tool }}</el-tag
             >
           </div>
+          <!-- Day11: 工具调用可视化（含状态） -->
+          <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="tool-calls-area">
+            <div
+              v-for="(tc, idx) in msg.toolCalls"
+              :key="idx"
+              class="tool-call-row"
+              :class="{ loading: tc.status === 'loading' }"
+            >
+              <span v-if="tc.status === 'loading'" class="tool-spinner">⏳</span>
+              <span v-else class="tool-done">✅</span>
+              <span class="tool-label">{{ getToolLabel(tc.tool) }}</span>
+              <span class="tool-summary">{{ tc.summary || '...' }}</span>
+            </div>
+          </div>
+          <!-- Day11: 知识来源显示 -->
+          <div v-if="msg.knowledgeSources && msg.knowledgeSources.length > 0" class="knowledge-sources-info">
+            <span class="kb-icon">📚</span>
+            <span class="kb-label">知识库检索结果：</span>
+            <span v-for="(src, idx) in msg.knowledgeSources" :key="idx" class="kb-source-tag">
+              {{ src.title || src.source }}
+            </span>
+          </div>
+          <div v-else-if="msg.hasKnowledge === false" class="knowledge-sources-info no-kb">
+            <span class="kb-icon">💡</span>
+            <span>回答来自大模型（知识库暂无相关内容）</span>
+          </div>
         </div>
 
         <!-- 用户头像 -->
@@ -231,6 +257,19 @@ function renderMd(text) {
   return md.render(text || "");
 }
 
+// Day11: 工具名称中文映射
+const TOOL_LABELS = {
+  detect_single_image: "单图检测",
+  detect_batch_images: "批量检测",
+  detect_zip_file: "ZIP检测",
+  query_system_info: "系统查询",
+  generate_report: "生成报告",
+  search_knowledge: "知识库检索",
+};
+function getToolLabel(tool) {
+  return TOOL_LABELS[tool] || tool;
+}
+
 async function sendMsg() {
   const text = inputText.value.trim();
   const files = selectedFiles.value;
@@ -347,21 +386,94 @@ async function sendMsg() {
     },
     {
       onMessage: (data) => {
+        const last = agentStore.messages[agentStore.messages.length - 1];
         if (data.type === "text_chunk") {
           fullContent += data.content;
           agentStore.updateLastAssistantMessage(fullContent);
+          // Day11: 处理知识来源（从 text_chunk 中携带）
+          if (data.knowledge_sources) {
+            last.knowledgeSources = data.knowledge_sources;
+          }
+          if (data.has_knowledge !== undefined) {
+            last.hasKnowledge = data.has_knowledge;
+          }
           scrollBottom();
+        } else if (data.type === "thinking") {
+          // Day11: Agent 正在思考，更新加载文案
+          if (last.loading && !last.content) {
+            last.content = data.content || "正在分析...";
+          }
+        } else if (data.type === "tool_start") {
+          // Day11: 工具开始调用
+          if (!last.toolCalls) last.toolCalls = [];
+          last.toolCalls.push({ tool: data.tool, status: "loading", summary: "" });
+          scrollBottom();
+        } else if (data.type === "tool_end") {
+          // Day11: 工具调用完成
+          if (!last.toolCalls) last.toolCalls = [];
+          const tc = last.toolCalls.find(
+            (t) => t.tool === data.tool && t.status === "loading"
+          );
+          if (tc) {
+            tc.status = "done";
+            tc.summary = data.summary?.slice(0, 80) || "完成";
+          } else {
+            last.toolCalls.push({
+              tool: data.tool,
+              status: "done",
+              summary: data.summary?.slice(0, 80) || "完成",
+            });
+          }
+          // 处理检测结果卡片
+          if (data.result) {
+            try {
+              const result = typeof data.result === "string"
+                ? JSON.parse(data.result)
+                : data.result;
+              if (result.total_objects !== undefined || result.annotated_image_base64) {
+                last.detectionResult = result;
+              }
+              // 处理知识库检索结果
+              if (data.tool === "search_knowledge" && result.knowledge) {
+                last.knowledgeSources = result.knowledge.map((k) => ({
+                  source: k.source,
+                  title: k.content?.match(/#\s+(.+)/)?.[1] || k.source,
+                  similarity: k.similarity,
+                }));
+              }
+            } catch (e) { /* ignore parse error */ }
+          }
+          scrollBottom();
+        } else if (data.type === "detection_card") {
+          // Day11: 检测结果卡片数据
+          last.detectionResult = data.data;
+          last.loading = false;
         } else if (data.type === "done") {
           // 流结束，记录后端返回的 session_id
           if (data.session_id) {
             agentStore.setCurrentSessionId(data.session_id);
-            // 刷新会话列表
             agentStore.loadSessions();
           }
         } else if (data.type === "error") {
-          const last = agentStore.messages[agentStore.messages.length - 1];
           last.content = data.content;
           last.loading = false;
+        }
+        // 兼容旧版事件类型
+        else if (data.type === "tool_call") {
+          last.toolCall = { tool: data.tool, input: data.input };
+        } else if (data.type === "tool_result") {
+          if (!last.toolCalls) last.toolCalls = [];
+          last.toolCalls.push({
+            tool: data.tool,
+            status: "done",
+            summary: data.result?.slice(0, 80) || "完成",
+          });
+          try {
+            const r = JSON.parse(data.result);
+            if (r.total_objects !== undefined || r.annotated_image_base64) {
+              last.detectionResult = r;
+            }
+          } catch (e) { /* ignore */ }
         }
       },
       onDone: () => {
@@ -770,5 +882,80 @@ async function handleDeleteSession(sessionId) {
     color: $text-secondary;
     font-size: 13px;
   }
+}
+
+// ── Day11: 工具调用可视化 ──
+.tool-calls-area {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.tool-call-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  color: #606266;
+  &.loading {
+    color: #909399;
+    .tool-label { color: #409eff; }
+  }
+}
+.tool-spinner {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+.tool-label {
+  font-weight: 500;
+  min-width: 70px;
+}
+.tool-summary {
+  color: #909399;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+// ── Day11: 知识来源显示 ──
+.knowledge-sources-info {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #f0f9eb;
+  border-radius: 6px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  &.no-kb {
+    background: #fdf6ec;
+  }
+}
+.kb-icon {
+  font-size: 14px;
+}
+.kb-label {
+  color: #67c23a;
+  font-weight: 500;
+}
+.kb-source-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #e1f3d8;
+  color: #529b2e;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.no-kb {
+  .kb-label { color: #e6a23c; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

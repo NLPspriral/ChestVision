@@ -57,6 +57,12 @@ const routes = [
         meta: { title: "数据看板", icon: "DataAnalysis" },
       },
       {
+        path: "profile",
+        name: "Profile",
+        component: () => import("@/views/ProfilePage.vue"),
+        meta: { title: "个人中心", icon: "User" },
+      },
+      {
         path: "patients",
         name: "Patients",
         component: () => import("@/views/PatientManagePage.vue"),
