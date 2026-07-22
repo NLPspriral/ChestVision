@@ -15,7 +15,7 @@ from app.train.remote_train_service import (
     remote_training_service,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 
@@ -150,6 +150,19 @@ class RemoteTrainingMetricCallbackRequest(BaseModel):
     map50: float | None = Field(None, description="metrics/mAP50(B)")
     map50_95: float | None = Field(None, description="metrics/mAP50-95(B)")
     lr: float | None = Field(None, description="学习率")
+
+
+class RemoteTrainingErrorCallbackRequest(BaseModel):
+    """PAI-DLC 训练容器上报的异常诊断信息。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    task_uuid: str = Field(..., description="后端创建的训练任务 UUID")
+    token: str = Field(..., description="每个任务独立的 callback token")
+    stage: str | None = Field(None, description="失败阶段")
+    error_type: str | None = Field(None, description="异常类型")
+    error: str | None = Field(None, description="异常摘要")
+    traceback: str | None = Field(None, description="异常堆栈")
 
 
 class OssMultipartUploadEventRequest(BaseModel):
@@ -493,6 +506,23 @@ async def handle_remote_training_metric_callback(
         )
     except Exception as exc:
         raise _handle_error(exc, "handle_remote_training_metric_callback")
+
+
+@router.post("/callbacks/error", summary="记录 PAI-DLC 训练异常")
+async def handle_remote_training_error_callback(
+    request: RemoteTrainingErrorCallbackRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = request.model_dump(exclude={"token"}, exclude_none=True)
+        return remote_training_service.handle_error_callback(
+            db=db,
+            task_uuid=request.task_uuid,
+            token=request.token,
+            error_detail=payload,
+        )
+    except Exception as exc:
+        raise _handle_error(exc, "handle_remote_training_error_callback")
 
 
 @router.get("/artifacts/{task_id}", summary="查询训练产物存储位置")

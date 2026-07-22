@@ -93,6 +93,20 @@ def _derive_metrics_callback_url(value: str) -> str:
     return url.rstrip("/") + "/callbacks/metrics"
 
 
+def _derive_error_callback_url(value: str) -> str:
+    """从 metrics/dlc 回调地址兼容推导 error 回调地址。"""
+    url = value.strip()
+    if not url:
+        return ""
+    if url.endswith("/callbacks/error"):
+        return url
+    if url.endswith("/callbacks/metrics"):
+        return url[: -len("/callbacks/metrics")] + "/callbacks/error"
+    if url.endswith("/callbacks/dlc"):
+        return url[: -len("/callbacks/dlc")] + "/callbacks/error"
+    return url.rstrip("/") + "/callbacks/error"
+
+
 @dataclass(frozen=True)
 class RemoteTrainSettings:
     """远程训练运行配置。
@@ -125,6 +139,8 @@ class RemoteTrainSettings:
     remote_callback_secret: str
     # PAI-DLC 容器向后端上报 epoch 指标的公网可访问地址。
     remote_metrics_callback_url: str
+    # PAI-DLC 容器向后端上报训练异常诊断的公网可访问地址。
+    remote_error_callback_url: str
 
     # PAI-DLC 控制面凭证。用于 CreateJob/GetJob/StopJob，不会下发给浏览器。
     pai_access_key_id: str
@@ -153,6 +169,11 @@ class RemoteTrainSettings:
     def from_env(cls) -> "RemoteTrainSettings":
         image_uri = _env("PAI_IMAGE_URI")
         registry_from_image = image_uri.split("/", 1)[0] if "/" in image_uri else ""
+        base_callback_url = _env("REMOTE_TRAINING_CALLBACK_URL", _env("CALLBACK_URL"))
+        metrics_callback_url = _env(
+            "REMOTE_TRAINING_METRICS_CALLBACK_URL",
+            _derive_metrics_callback_url(base_callback_url),
+        )
         return cls(
             oss_access_key_id=_env(
                 "OSS_ACCESS_KEY_ID", _env("ALIBABA_CLOUD_ACCESS_KEY_ID")
@@ -174,11 +195,10 @@ class RemoteTrainSettings:
             oss_prefix=_env("REMOTE_TRAIN_OSS_PREFIX", "remote-training"),
             upload_url_expires_seconds=_env_int("OSS_UPLOAD_URL_EXPIRES_SECONDS", 900),
             remote_callback_secret=_env("REMOTE_TRAINING_CALLBACK_SECRET"),
-            remote_metrics_callback_url=_env(
-                "REMOTE_TRAINING_METRICS_CALLBACK_URL",
-                _derive_metrics_callback_url(
-                    _env("REMOTE_TRAINING_CALLBACK_URL", _env("CALLBACK_URL"))
-                ),
+            remote_metrics_callback_url=metrics_callback_url,
+            remote_error_callback_url=_env(
+                "REMOTE_TRAINING_ERROR_CALLBACK_URL",
+                _derive_error_callback_url(metrics_callback_url or base_callback_url),
             ),
             pai_access_key_id=_env(
                 "PAI_ACCESS_KEY_ID", _env("ALIBABA_CLOUD_ACCESS_KEY_ID")

@@ -50,6 +50,9 @@ DEFAULT_MULTIPART_PART_SIZE = 32 * 1024 * 1024
 MIN_MULTIPART_PART_SIZE = 5 * 1024 * 1024
 MAX_MULTIPART_PARTS = 10000
 MAX_PARTS_PER_SIGN = 50
+REMOTE_ERROR_TEXT_LIMIT = 20000
+REMOTE_ERROR_LIST_LIMIT = 80
+REMOTE_ERROR_DEPTH_LIMIT = 6
 
 
 class RemoteTrainingValidationError(ValueError):
@@ -828,6 +831,20 @@ class RemoteTrainingService:
         remote_job.remote_status = remote_status
         remote_job.last_synced_at = _now()
         remote_job.updated_at = _now()
+        if (
+            task.status == "failed"
+            and remote_job.error_message
+            and remote_status in {"SUBMITTED", "QUEUED", "RUNNING"}
+        ):
+            remote_job.remote_status = "FAILED"
+            db.commit()
+            db.refresh(task)
+            db.refresh(remote_job)
+            return self.serialize_training(
+                task,
+                remote_job,
+                latest_metric=self._latest_metric_payload(db, task.id),
+            )
 
         if remote_status in {"SUBMITTED", "QUEUED"}:
             task.status = "pending"
@@ -845,8 +862,10 @@ class RemoteTrainingService:
                 getattr(job, "message", None),
             )
             task.status = "failed"
-            task.error_message = "远程训练失败，请联系管理员查看后端日志"
-            remote_job.error_message = task.error_message
+            if not task.error_message:
+                task.error_message = "远程训练失败，请联系管理员查看后端日志"
+            if not remote_job.error_message:
+                remote_job.error_message = task.error_message
         elif remote_status == "STOPPED":
             task.status = "cancelled"
             task.completed_at = task.completed_at or _now()
@@ -910,7 +929,10 @@ class RemoteTrainingService:
             self._complete_if_artifacts_ready(db, task, remote_job)
         elif remote_job.remote_status == "FAILED":
             task.status = "failed"
-            task.error_message = "远程回调报告训练失败"
+            if not task.error_message:
+                task.error_message = "远程回调报告训练失败"
+            if not remote_job.error_message:
+                remote_job.error_message = task.error_message
         elif remote_job.remote_status == "STOPPED":
             task.status = "cancelled"
         db.commit()
@@ -988,6 +1010,47 @@ class RemoteTrainingService:
             latest_metric=self._metric_payload(metric),
         )
 
+    def handle_error_callback(
+        self,
+        db: Session,
+        task_uuid: str,
+        token: str,
+        error_detail: dict[str, Any],
+    ) -> dict[str, Any]:
+        """接收 PAI-DLC 容器上报的训练异常诊断。"""
+        task = db.query(TrainingTask).filter(TrainingTask.task_uuid == task_uuid).first()
+        if not task:
+            raise RemoteTrainingValidationError("远程训练任务不存在")
+        remote_job = (
+            db.query(RemoteTrainingJob)
+            .filter(RemoteTrainingJob.task_id == task.id)
+            .first()
+        )
+        if not remote_job:
+            raise RemoteTrainingValidationError("远程训练任务不存在")
+        if remote_job.callback_token_hash != _hash_token(token):
+            raise RemoteTrainingValidationError("回调 token 无效")
+
+        detail = self._sanitize_error_detail(error_detail)
+        summary = self._error_summary(detail)
+        task.status = "failed"
+        task.error_message = summary
+        task.updated_at = _now()
+        task.completed_at = task.completed_at or _now()
+        remote_job.remote_status = "FAILED"
+        remote_job.error_message = json.dumps(detail, ensure_ascii=False)
+        remote_job.completed_at = remote_job.completed_at or _now()
+        remote_job.last_synced_at = _now()
+        remote_job.updated_at = _now()
+        db.commit()
+        db.refresh(task)
+        db.refresh(remote_job)
+        return self.serialize_training(
+            task,
+            remote_job,
+            latest_metric=self._latest_metric_payload(db, task.id),
+        )
+
     def list_artifact_locations(
         self, db: Session, task_id: int, user_id: int | None = None
     ) -> list[dict[str, Any]]:
@@ -1024,6 +1087,7 @@ class RemoteTrainingService:
             "OSS_BUCKET": self.settings.oss_bucket,
             "CALLBACK_TOKEN": callback_token,
             "METRICS_CALLBACK_URL": self.settings.remote_metrics_callback_url,
+            "ERROR_CALLBACK_URL": self.settings.remote_error_callback_url,
             "CALLBACK_TIMEOUT_SECONDS": "5",
             "MODEL_NAME": task.model_name,
             "EPOCHS": str(task.epochs),
@@ -1050,7 +1114,7 @@ class RemoteTrainingService:
             "set -e; "
             f"mkdir -p {output}/weights {output}/dataset; "
             f"python - <<'PY'\n"
-            f"import json, os, platform, shutil, sys, time, traceback, zipfile\n"
+            f"import json, os, platform, shutil, sys, time, traceback, urllib.request, zipfile\n"
             f"mount_dir = {dataset!r}\n"
             f"output_dir = {output!r}\n"
             f"work_dir = '/tmp/remote_train_dataset'\n"
@@ -1074,6 +1138,20 @@ class RemoteTrainingService:
             f"    if extra:\n"
             f"        payload.update(extra)\n"
             f"    text = json.dumps(payload, ensure_ascii=False, indent=2)\n"
+            f"    try:\n"
+            f"        url = os.environ.get('ERROR_CALLBACK_URL')\n"
+            f"        token = os.environ.get('CALLBACK_TOKEN')\n"
+            f"        task_uuid = os.environ.get('TASK_UUID')\n"
+            f"        if url and token and task_uuid:\n"
+            f"            body = dict(payload)\n"
+            f"            body.update({{'task_uuid': task_uuid, 'token': token}})\n"
+            f"            data = json.dumps(body, ensure_ascii=False).encode('utf-8')\n"
+            f"            request = urllib.request.Request(url, data=data, headers={{'Content-Type': 'application/json'}}, method='POST')\n"
+            f"            timeout = float(os.environ.get('CALLBACK_TIMEOUT_SECONDS', '5'))\n"
+            f"            with urllib.request.urlopen(request, timeout=timeout) as response:\n"
+            f"                response.read()\n"
+            f"    except Exception as callback_exc:\n"
+            f"        print('error callback failed: ' + type(callback_exc).__name__, flush=True)\n"
             f"    print('REMOTE_TRAIN_ERROR ' + text, flush=True)\n"
             f"    try:\n"
             f"        os.makedirs(os.path.join(output_dir, 'dataset'), exist_ok=True)\n"
@@ -1200,6 +1278,20 @@ class RemoteTrainingService:
             f"        'traceback': traceback.format_exc(),\n"
             f"    }}\n"
             f"    text = json.dumps(payload, ensure_ascii=False, indent=2)\n"
+            f"    try:\n"
+            f"        url = os.environ.get('ERROR_CALLBACK_URL')\n"
+            f"        token = os.environ.get('CALLBACK_TOKEN')\n"
+            f"        task_uuid = os.environ.get('TASK_UUID')\n"
+            f"        if url and token and task_uuid:\n"
+            f"            body = dict(payload)\n"
+            f"            body.update({{'task_uuid': task_uuid, 'token': token}})\n"
+            f"            data = json.dumps(body, ensure_ascii=False).encode('utf-8')\n"
+            f"            request = urllib.request.Request(url, data=data, headers={{'Content-Type': 'application/json'}}, method='POST')\n"
+            f"            timeout = float(os.environ.get('CALLBACK_TIMEOUT_SECONDS', '5'))\n"
+            f"            with urllib.request.urlopen(request, timeout=timeout) as response:\n"
+            f"                response.read()\n"
+            f"    except Exception as callback_exc:\n"
+            f"        print('error callback failed: ' + type(callback_exc).__name__, flush=True)\n"
             f"    print('REMOTE_TRAIN_ERROR ' + text, flush=True)\n"
             f"    try:\n"
             f"        os.makedirs(output_dir, exist_ok=True)\n"
@@ -1280,7 +1372,7 @@ class RemoteTrainingService:
             f"    raise\n"
             f"PY\n"
             f"python - <<'PY'\n"
-            f"import json, os, shutil, time, traceback\n"
+            f"import json, os, shutil, time, traceback, urllib.request\n"
             f"output_dir = {output!r}\n"
             f"def list_tree(root, max_entries=80, max_depth=3):\n"
             f"    entries = []\n"
@@ -1312,6 +1404,20 @@ class RemoteTrainingService:
             f"        'traceback': traceback.format_exc(),\n"
             f"    }}\n"
             f"    text = json.dumps(payload, ensure_ascii=False, indent=2)\n"
+            f"    try:\n"
+            f"        url = os.environ.get('ERROR_CALLBACK_URL')\n"
+            f"        token = os.environ.get('CALLBACK_TOKEN')\n"
+            f"        task_uuid = os.environ.get('TASK_UUID')\n"
+            f"        if url and token and task_uuid:\n"
+            f"            body = dict(payload)\n"
+            f"            body.update({{'task_uuid': task_uuid, 'token': token}})\n"
+            f"            data = json.dumps(body, ensure_ascii=False).encode('utf-8')\n"
+            f"            request = urllib.request.Request(url, data=data, headers={{'Content-Type': 'application/json'}}, method='POST')\n"
+            f"            timeout = float(os.environ.get('CALLBACK_TIMEOUT_SECONDS', '5'))\n"
+            f"            with urllib.request.urlopen(request, timeout=timeout) as response:\n"
+            f"                response.read()\n"
+            f"    except Exception as callback_exc:\n"
+            f"        print('error callback failed: ' + type(callback_exc).__name__, flush=True)\n"
             f"    print('REMOTE_TRAIN_ERROR ' + text, flush=True)\n"
             f"    try:\n"
             f"        open(os.path.join(output_dir, 'train_error.json'), 'w').write(text)\n"
@@ -1534,6 +1640,59 @@ class RemoteTrainingService:
             .first()
         )
         return self._metric_payload(metric)
+
+    def _sanitize_error_detail(self, value: Any, depth: int = 0) -> Any:
+        if depth > REMOTE_ERROR_DEPTH_LIMIT:
+            return self._clamp_text(repr(value))
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, item in list(value.items())[:REMOTE_ERROR_LIST_LIMIT]:
+                if key == "token":
+                    continue
+                sanitized[str(key)] = self._sanitize_error_detail(item, depth + 1)
+            return sanitized
+        if isinstance(value, list):
+            return [
+                self._sanitize_error_detail(item, depth + 1)
+                for item in value[:REMOTE_ERROR_LIST_LIMIT]
+            ]
+        if isinstance(value, tuple):
+            return [
+                self._sanitize_error_detail(item, depth + 1)
+                for item in value[:REMOTE_ERROR_LIST_LIMIT]
+            ]
+        if isinstance(value, str):
+            return self._clamp_text(value)
+        if value is None or isinstance(value, (int, float, bool)):
+            return value
+        return self._clamp_text(repr(value))
+
+    @staticmethod
+    def _clamp_text(value: str) -> str:
+        if len(value) <= REMOTE_ERROR_TEXT_LIMIT:
+            return value
+        return value[:REMOTE_ERROR_TEXT_LIMIT] + "\n...<truncated>"
+
+    @staticmethod
+    def _error_summary(detail: dict[str, Any]) -> str:
+        stage = detail.get("stage") or "unknown"
+        error_type = detail.get("error_type") or "Error"
+        error = detail.get("error") or "远程训练失败"
+        return f"{stage}: {error_type}: {error}"
+
+    def _error_detail_payload(
+        self, remote_job: RemoteTrainingJob
+    ) -> dict[str, Any] | None:
+        raw = remote_job.error_message
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return {"error": raw}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"error": parsed}
 
     def _upsert_artifact_location(
         self,
@@ -1763,6 +1922,7 @@ class RemoteTrainingService:
             "img_size": task.img_size,
             "dataset_path": task.dataset_path,
             "error_message": task.error_message,
+            "error_detail": self._error_detail_payload(remote_job),
             "latest_metric": latest_metric,
             "remote": {
                 "dlc_job_id": remote_job.dlc_job_id,

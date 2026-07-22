@@ -173,22 +173,44 @@
           </div>
         </div>
       </template>
-      <el-row :gutter="16" class="metric-cards">
-        <el-col :span="4" v-for="item in metricCards" :key="item.label">
-          <el-card shadow="hover" class="metric-item">
-            <div class="metric-value">{{ item.value }}</div>
-            <div class="metric-label">{{ item.label }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
-      <el-row :gutter="16" style="margin-top: 16px">
-        <el-col :span="12"
-          ><div ref="lossChartRef" style="height: 350px"></div
-        ></el-col>
-        <el-col :span="12"
-          ><div ref="mapChartRef" style="height: 350px"></div
-        ></el-col>
-      </el-row>
+      <el-tabs v-model="monitorActiveTab" @tab-change="handleMonitorTabChange">
+        <el-tab-pane label="监控曲线" name="metrics">
+          <el-row :gutter="16" class="metric-cards">
+            <el-col :span="4" v-for="item in metricCards" :key="item.label">
+              <el-card shadow="hover" class="metric-item">
+                <div class="metric-value">{{ item.value }}</div>
+                <div class="metric-label">{{ item.label }}</div>
+              </el-card>
+            </el-col>
+          </el-row>
+          <el-row :gutter="16" style="margin-top: 16px">
+            <el-col :span="12"
+              ><div ref="lossChartRef" style="height: 350px"></div
+            ></el-col>
+            <el-col :span="12"
+              ><div ref="mapChartRef" style="height: 350px"></div
+            ></el-col>
+          </el-row>
+        </el-tab-pane>
+        <el-tab-pane v-if="hasTrainingError" label="错误信息" name="error">
+          <div class="training-error-panel">
+            <div class="training-error-toolbar">
+              <el-alert
+                :title="trainingErrorSummary"
+                type="error"
+                show-icon
+                :closable="false"
+              />
+              <el-button :icon="Download" @click="downloadTrainingError">
+                下载错误信息
+              </el-button>
+            </div>
+            <el-scrollbar height="360px" class="training-error-scrollbar">
+              <pre class="training-error-text">{{ trainingErrorText }}</pre>
+            </el-scrollbar>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
 
     <!-- 【Day 7 新增】模型操作栏 -->
@@ -512,7 +534,7 @@
 <script setup>
 import { uploadDataset } from "@/api/dataset";
 import request from "@/utils/request";
-import { Plus, Refresh } from "@element-plus/icons-vue";
+import { Download, Plus, Refresh } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
@@ -523,6 +545,7 @@ const selectedTask = ref(null);
 const monitorRefreshing = ref(false);
 const lastMonitorRefreshAt = ref(null);
 const refreshClockNow = ref(Date.now());
+const monitorActiveTab = ref("metrics");
 const showCreateDialog = ref(false);
 const creating = ref(false);
 const lossChartRef = ref(null);
@@ -669,6 +692,38 @@ const monitorRefreshLabel = computed(() => {
   return `刷新 · ${formatRefreshAge(lastMonitorRefreshAt.value, refreshClockNow.value)}前`;
 });
 
+const trainingErrorDetail = computed(() => {
+  const task = selectedTask.value;
+  if (!task) return null;
+  return (
+    task.error_detail ||
+    task.remote?.error_detail ||
+    parseErrorDetail(task.remote?.error_message) ||
+    parseErrorDetail(task.error_message)
+  );
+});
+
+const hasTrainingError = computed(() => {
+  const status = String(selectedTask.value?.status || "").toLowerCase();
+  return status === "failed" && Boolean(trainingErrorDetail.value);
+});
+
+const trainingErrorSummary = computed(() => {
+  const detail = trainingErrorDetail.value;
+  if (!detail) return selectedTask.value?.error_message || "远程训练失败";
+  const stage = detail.stage ? errorStageText(detail.stage) : "远程训练";
+  const errorType = detail.error_type || "Error";
+  const error = detail.error || selectedTask.value?.error_message || "训练失败";
+  return `${stage} · ${errorType}: ${error}`;
+});
+
+const trainingErrorText = computed(() => {
+  const detail = trainingErrorDetail.value || {
+    error: selectedTask.value?.error_message || "训练失败",
+  };
+  return JSON.stringify(detail, null, 2);
+});
+
 const perClassData = computed(() => {
   if (!evalReport.value) return [];
   const pc = evalReport.value.per_class || {};
@@ -710,6 +765,44 @@ function statusText(s) {
   return m[s] || s;
 }
 
+function parseErrorDetail(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return { error: String(value) };
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null
+      ? parsed
+      : { error: parsed };
+  } catch {
+    return { error: value };
+  }
+}
+
+function errorStageText(stage) {
+  const map = {
+    prepare_dataset: "数据准备",
+    train_yolo: "模型训练",
+    collect_artifacts: "产物收集",
+  };
+  return map[stage] || stage;
+}
+
+function downloadTrainingError() {
+  if (!selectedTask.value) return;
+  const blob = new Blob([trainingErrorText.value], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `training-error-${selectedTask.value.task_uuid || selectedTask.value.id}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function canCancelTask(task) {
   return Boolean(task) && shouldPollMonitorTask(task);
 }
@@ -735,6 +828,7 @@ async function fetchTasks() {
 
 async function selectTask(task) {
   selectedTask.value = task;
+  monitorActiveTab.value = "metrics";
   lastMonitorRefreshAt.value = null;
   await nextTick();
   // 延迟初始化图表，确保 Element Plus 组件完成布局
@@ -794,6 +888,7 @@ async function fetchMetrics({ force = false } = {}) {
     if (statusRes) {
       selectedTask.value = normalizeTaskStatus(selectedTask.value, statusRes);
     }
+    syncMonitorTab();
     if (metrics.length > 0) updateCharts(metrics);
     lastMonitorRefreshAt.value = Date.now();
     refreshClockNow.value = Date.now();
@@ -804,6 +899,20 @@ async function fetchMetrics({ force = false } = {}) {
     console.error("获取指标失败", e);
   } finally {
     monitorRefreshing.value = false;
+  }
+}
+
+function syncMonitorTab() {
+  if (hasTrainingError.value) {
+    monitorActiveTab.value = "error";
+  } else if (monitorActiveTab.value === "error") {
+    monitorActiveTab.value = "metrics";
+  }
+}
+
+function handleMonitorTabChange(name) {
+  if (name === "metrics") {
+    nextTick(handleChartResize);
   }
 }
 
@@ -1371,6 +1480,33 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+.training-error-panel {
+  padding-top: 4px;
+}
+.training-error-toolbar {
+  align-items: flex-start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 12px;
+}
+.training-error-scrollbar {
+  background: #1f2329;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.training-error-text {
+  color: #e5e7eb;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .task-list-card,
 .monitor-card,
