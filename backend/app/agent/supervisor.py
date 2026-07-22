@@ -42,7 +42,11 @@ AgentRoute = Literal[
 
 
 class SupervisorAgent:
-    """任务调度 Supervisor — 分析用户意图并决定下一步由哪个 Agent 处理"""
+    """任务调度与统一回复 Supervisor。
+
+    专业 Agent 只负责产生结构化结果，所有面向用户的最终回复均由本类完成，
+    从而确保回复始终使用同一份完整会话历史。
+    """
 
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
@@ -58,7 +62,7 @@ class SupervisorAgent:
         """
         messages = state.get("messages", [])
         if not messages:
-            return {"next_agent": "FINISH"}
+            return {"next_agent": "FINISH", "routed_agent": "FINISH"}
 
         # 获取最后一条用户消息
         last_user_msg = ""
@@ -68,22 +72,22 @@ class SupervisorAgent:
                 break
 
         if not last_user_msg:
-            return {"next_agent": "FINISH"}
+            return {"next_agent": "FINISH", "routed_agent": "FINISH"}
 
         # ── 规则快速路由（减少 LLM 调用成本）──
         fast_route = self._fast_route(last_user_msg, state)
         if fast_route:
             logger.info("Supervisor 快速路由: %s → %s", last_user_msg[:50], fast_route)
-            return {"next_agent": fast_route}
+            return {"next_agent": fast_route, "routed_agent": fast_route}
 
         # ── LLM 语义路由 ──
         try:
-            route = await self._llm_route(last_user_msg)
+            route = await self._llm_route(messages, last_user_msg)
             logger.info("Supervisor LLM 路由: %s → %s", last_user_msg[:50], route)
-            return {"next_agent": route}
+            return {"next_agent": route, "routed_agent": route}
         except Exception as e:
             logger.error("Supervisor LLM 路由失败: %s，降级为 summarize", str(e))
-            return {"next_agent": "summarize"}
+            return {"next_agent": "summarize", "routed_agent": "summarize"}
 
     def _fast_route(self, message: str, state: dict) -> AgentRoute | None:
         """基于规则的快速路由，无需 LLM 调用
@@ -152,10 +156,8 @@ class SupervisorAgent:
             "需不需要", "治疗建议", "下一步",
         ]
         if any(kw in message for kw in diagnosis_keywords):
-            # 如果还没有检测结果，检查是否在回顾历史（由 1.5 处理）
-            detection_result = state.get("detection_result", {})
-            if not detection_result:
-                return "detection"
+            # 新一轮 state 通常不会直接携带上一轮检测结果；diagnosis 节点会按
+            # 当前用户从数据库恢复最近检测，不能因为 state 为空就误路由为重新检测。
             return "diagnosis"
 
         # 5. 知识问答关键词 → qa
@@ -172,14 +174,23 @@ class SupervisorAgent:
         # 无法快速判断
         return None
 
-    async def _llm_route(self, message: str) -> AgentRoute:
-        """使用 LLM 进行语义路由"""
+    async def _llm_route(self, messages: list, message: str) -> AgentRoute:
+        """使用 LLM 结合历史对话进行语义路由。"""
         prompt = SUPERVISOR_ROUTING_PROMPT.format(user_message=message)
 
-        response = await self.llm.ainvoke([
-            SystemMessage(content="你是一个任务路由专家。只回复目标节点名称，不要回复其他内容。"),
-            HumanMessage(content=prompt),
-        ])
+        history = list(messages[:-1])[-16:]
+        response = await self.llm.ainvoke(
+            [
+                SystemMessage(
+                    content=(
+                        "你是 ChestVision 的任务路由 Supervisor。"
+                        "你可以阅读完整历史，但只回复目标节点名称，不回答用户问题。"
+                    )
+                ),
+                *history,
+                HumanMessage(content=prompt),
+            ]
+        )
 
         route_text = (response.content if hasattr(response, "content")
                       else str(response)).strip().lower()
@@ -191,3 +202,93 @@ class SupervisorAgent:
 
         logger.warning("LLM 返回未知路由: %s，降级为 summarize", route_text)
         return "summarize"
+
+    async def answer(self, state: dict) -> dict:
+        """基于完整历史和专业 Agent 结果，由 Supervisor 统一生成最终回复。"""
+        messages = list(state.get("messages", []))
+        routed_agent = state.get("routed_agent") or state.get("next_agent", "summarize")
+        agent_context = self._build_agent_context(state, routed_agent)
+
+        supervisor_prompt = SystemMessage(
+            content=(
+                "你是 ChestVision 的 Supervisor，也是唯一面向用户作最终回答的助手。"
+                "你必须结合下方完整对话历史回答最新一条用户消息，并延续用户此前自述的"
+                "姓名、职称、专长、偏好以及当前登录身份。不得声称自己没有历史记录，"
+                "不得以权限限制为由否认历史中已经提供的信息。\n"
+                "专业 Agent 的输出只是本轮可引用的事实和草稿，不是最终回答；请由你统一"
+                "组织语言，不要向用户提及路由、子 Agent、内部状态或服务器文件路径。"
+                "若专业结果与明确的历史事实冲突，以系统身份信息、真实检测数据和数据库"
+                "上下文为准。医学结论须说明仅供辅助参考，最终诊断由临床医生结合实际判断。"
+            )
+        )
+        result_prompt = SystemMessage(
+            content=f"[本轮专业 Agent 结果，仅供 Supervisor 组织最终回答]\n{agent_context}"
+        )
+
+        if messages:
+            answer_messages = [supervisor_prompt, *messages[:-1], result_prompt, messages[-1]]
+        else:
+            answer_messages = [supervisor_prompt, result_prompt]
+
+        try:
+            response = await self.llm.ainvoke(answer_messages)
+            final_response = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+        except Exception as e:
+            logger.error("Supervisor 统一回复失败: %s", str(e), exc_info=True)
+            final_response = self._fallback_response(state)
+
+        logger.info(
+            "Supervisor 统一回复完成: route=%s, text_len=%d",
+            routed_agent,
+            len(final_response),
+        )
+        return {
+            "final_response": final_response,
+            "knowledge_sources": state.get("knowledge_sources", []),
+            "has_knowledge": state.get("has_knowledge", False),
+        }
+
+    @staticmethod
+    def _build_agent_context(state: dict, routed_agent: str) -> str:
+        detection = state.get("detection_result", {}) or {}
+        safe_detection = {
+            "total_objects": detection.get("total_objects"),
+            "class_counts": detection.get("class_counts", {}),
+            "detections": detection.get("detections", []),
+            "inference_time": detection.get("inference_time"),
+            "task_id": detection.get("task_id"),
+            "risk_level": detection.get("risk_level"),
+            "error": detection.get("error"),
+        }
+        context = {
+            "routed_agent": routed_agent,
+            "detection_result": safe_detection,
+            "diagnosis_result": state.get("diagnosis_result", {}),
+            "report_result": state.get("report_result", ""),
+            "qa_result": state.get("qa_result", ""),
+            "knowledge_sources": [
+                {
+                    "source": source.get("source"),
+                    "similarity": source.get("similarity"),
+                }
+                for source in state.get("knowledge_sources", [])
+                if isinstance(source, dict)
+            ],
+        }
+        return json.dumps(context, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _fallback_response(state: dict) -> str:
+        if state.get("report_result"):
+            return state["report_result"]
+        if state.get("qa_result"):
+            return state["qa_result"]
+        diagnosis = state.get("diagnosis_result", {}) or {}
+        if diagnosis.get("findings"):
+            return diagnosis["findings"]
+        detection = state.get("detection_result", {}) or {}
+        if detection.get("total_objects", -1) >= 0:
+            return f"本次共检测到 {detection.get('total_objects', 0)} 个病灶，请结合检测结果卡片查看详情。"
+        return "暂时无法生成完整回复，请稍后重试。"

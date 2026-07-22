@@ -321,6 +321,7 @@ async def chat_stream(
             "patient_profile_id": patient_profile_id,
             "image_path": image_path,
             "next_agent": "supervisor",
+            "routed_agent": "",
             "detection_result": detection_result_for_state,
             "diagnosis_result": {},
             "report_result": "",
@@ -695,6 +696,7 @@ async def multi_agent_chat(
             initial_state: MultiAgentState = {
                 "messages": chat_history + [LcHumanMessage(content=enhanced_message)],
                 "next_agent": "",
+                "routed_agent": "",
                 "detection_result": {},
                 "diagnosis_result": {},
                 "report_result": "",
@@ -746,8 +748,8 @@ async def multi_agent_chat(
                             }
                             yield f"data: {json.dumps({'type': 'detection_card', 'data': card_data}, ensure_ascii=False)}\n\n"
 
-                    # 如果是汇总节点，发送最终回复
-                    if node_name == "summarize" and node_output.get("final_response"):
+                    # 最终回复只由 Supervisor 统一回答节点发送
+                    if node_name == "supervisor_answer" and node_output.get("final_response"):
                         final_text = node_output["final_response"]
                         knowledge_sources = node_output.get("knowledge_sources", [])
                         has_knowledge = node_output.get("has_knowledge", False)

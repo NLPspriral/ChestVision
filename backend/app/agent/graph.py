@@ -16,11 +16,16 @@ LangGraph 多 Agent 工作流 — 胸片X光智能分析系统
            ┌───────┬───────┼───────┬───────┐
            ▼       ▼       ▼       ▼       ▼
        ┌──────┐┌──────┐┌──────┐┌──────┐┌──────────┐
-       │detect││diagno││report││  qa  ││summarize │
+       │detect││diagno││report││  qa  ││ direct   │
        └──┬───┘└──┬───┘└──┬───┘└──┬───┘└────┬─────┘
           │       │       │       │         │
           └───────┴───────┴───────┴─────────┘
                            │
+                           ▼
+                    ┌─────────────┐
+                    │ Supervisor  │  ← 完整历史 + 专业结果
+                    │   Answer    │
+                    └──────┬──────┘
                            ▼
                     ┌─────────────┐
                     │    END      │
@@ -28,10 +33,10 @@ LangGraph 多 Agent 工作流 — 胸片X光智能分析系统
 
 路由规则：
   - detection → diagnosis（自动衔接）
-  - diagnosis → summarize
-  - report    → summarize
-  - qa        → summarize
-  - summarize → END
+  - diagnosis → supervisor_answer
+  - report    → supervisor_answer
+  - qa        → supervisor_answer
+  - direct    → supervisor_answer
   - FINISH    → END
 
 使用方式：
@@ -49,7 +54,6 @@ from app.agent.nodes import (
     diagnosis_node,
     qa_node,
     report_node,
-    summarize_node,
 )
 from app.agent.state import MultiAgentState
 from app.agent.supervisor import SupervisorAgent
@@ -96,7 +100,8 @@ def build_agent_graph(llm=None):
     workflow.add_node("diagnosis", _make_node_async(diagnosis_node, llm))
     workflow.add_node("report", _make_node_async(report_node, llm))
     workflow.add_node("qa", _make_node_async(qa_node, llm))
-    workflow.add_node("summarize", _make_node_async(summarize_node, llm))
+    # 专业 Agent 只产出结果，最终回复由读取完整历史的 Supervisor 统一生成。
+    workflow.add_node("supervisor_answer", supervisor.answer)
 
     # ── 设置入口 ──
     workflow.set_entry_point("supervisor")
@@ -111,22 +116,19 @@ def build_agent_graph(llm=None):
             "diagnosis": "diagnosis",
             "report": "report",
             "qa": "qa",
-            "summarize": "summarize",
-            "FINISH": END,
+            "summarize": "supervisor_answer",
+            "FINISH": "supervisor_answer",
         },
     )
 
     # ── 各 Agent → 下一节点 ──
     # detection → diagnosis（检测完自动诊断）
     workflow.add_edge("detection", "diagnosis")
-    # diagnosis → summarize
-    workflow.add_edge("diagnosis", "summarize")
-    # report → summarize
-    workflow.add_edge("report", "summarize")
-    # qa → summarize
-    workflow.add_edge("qa", "summarize")
-    # summarize → END
-    workflow.add_edge("summarize", END)
+    # 所有专业结果均回到 Supervisor，由其读取完整历史后统一回答。
+    workflow.add_edge("diagnosis", "supervisor_answer")
+    workflow.add_edge("report", "supervisor_answer")
+    workflow.add_edge("qa", "supervisor_answer")
+    workflow.add_edge("supervisor_answer", END)
 
     # ── 编译图 ──
     compiled_graph = workflow.compile()
@@ -173,7 +175,7 @@ async def run_graph_stream(
         "diagnosis": "正在进行综合诊断分析...",
         "report": "正在生成诊断报告...",
         "qa": "正在检索医学知识库...",
-        "summarize": "正在整理回复...",
+        "supervisor_answer": "Supervisor 正在结合对话历史组织回复...",
     }
 
     # 用 updates 模式获取每个节点的输出
@@ -217,8 +219,8 @@ async def run_graph_stream(
                             clr()
                         yield {"type": "detection_card", "data": card_data}
 
-                # ── 汇总节点 → 收集最终回复 ──
-                if node_name == "summarize":
+                # ── Supervisor 最终回答节点 → 收集最终回复 ──
+                if node_name == "supervisor_answer":
                     final_response = node_output.get("final_response", "")
                     if not final_response:
                         final_response = accumulated_state.get("final_response", "")

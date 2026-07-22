@@ -107,7 +107,7 @@
                   :class="an.status"
                 >
                   <span class="agent-node-icon">{{
-                    an.node === "supervisor" ? "🧠" :
+                    an.node === "supervisor" || an.node === "supervisor_answer" ? "🧠" :
                     an.node === "detection" ? "🔬" :
                     an.node === "diagnosis" ? "📋" :
                     an.node === "report" ? "📄" :
@@ -389,6 +389,7 @@ async function sendMsg() {
         if (!last.agentNodes) last.agentNodes = [];
         const nodeLabels = {
           supervisor: "🧠 任务调度",
+          supervisor_answer: "🧠 Supervisor 统一回答",
           detection: "🔬 病灶检测",
           diagnosis: "📋 综合诊断",
           report: "📄 报告生成",
