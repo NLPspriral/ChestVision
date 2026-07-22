@@ -118,36 +118,6 @@
         </el-form-item>
       </el-form>
       <div v-if="uploadProgress.visible" class="upload-progress">
-        <div class="progress-title">
-          <span>OSS 分片上传</span>
-          <span>{{ uploadProgress.phaseText }}</span>
-        </div>
-        <div class="progress-stats">
-          <div class="progress-stat">
-            <span class="stat-label">总分片</span>
-            <span class="stat-value">{{ uploadProgress.totalParts }} 片</span>
-          </div>
-          <div class="progress-stat">
-            <span class="stat-label">已上传</span>
-            <span class="stat-value">
-              {{ uploadProgress.uploadedParts }}/{{ uploadProgress.totalParts }} 片
-            </span>
-          </div>
-          <div class="progress-stat">
-            <span class="stat-label">当前分片</span>
-            <span class="stat-value">
-              {{
-                uploadProgress.currentPartNumber
-                  ? `第 ${uploadProgress.currentPartNumber} 片`
-                  : "-"
-              }}
-            </span>
-          </div>
-          <div class="progress-stat">
-            <span class="stat-label">分片大小</span>
-            <span class="stat-value">{{ formatBytes(uploadProgress.partSize) }}</span>
-          </div>
-        </div>
         <el-progress
           :percentage="Math.round(uploadProgress.percent)"
           :status="uploadProgress.percent >= 100 ? 'success' : undefined"
@@ -159,6 +129,9 @@
           </span>
           <span>速度 {{ formatSpeed(uploadProgress.speedBytesPerSecond) }}</span>
           <span>预计剩余 {{ formatDuration(uploadProgress.remainingSeconds) }}</span>
+        </div>
+        <div class="progress-parts">
+          已上传分片 {{ uploadProgress.uploadedParts }}/{{ uploadProgress.totalParts }}
         </div>
       </div>
       <template #footer>
@@ -311,11 +284,8 @@ function createUploadProgress(visible = false) {
   return {
     visible,
     phase: "idle",
-    phaseText: "等待上传",
-    currentPartNumber: null,
     uploadedParts: 0,
     totalParts,
-    partSize: DATASET_UPLOAD_PART_SIZE,
     uploadedBytes: 0,
     totalBytes,
     percent: 0,
@@ -325,19 +295,9 @@ function createUploadProgress(visible = false) {
 }
 
 function updateUploadProgress(progress) {
-  const phaseTextMap = {
-    signing: "签发分片 URL",
-    uploading: progress.currentPartNumber
-      ? `上传第 ${progress.currentPartNumber} 片`
-      : "上传中",
-    finalizing: "合并分片",
-    completed: "上传完成",
-  };
   uploadProgress.value = {
     visible: true,
-    partSize: uploadProgress.value.partSize || DATASET_UPLOAD_PART_SIZE,
     ...progress,
-    phaseText: phaseTextMap[progress.phase] || "上传中",
   };
 }
 
@@ -468,54 +428,10 @@ onMounted(fetchDatasets);
   padding-top: 14px;
 }
 
-.progress-title,
 .progress-meta {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-}
-
-.progress-title {
-  color: #303133;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.progress-stats {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 12px;
-}
-
-.progress-stat {
-  background: #f5f7fa;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  min-width: 0;
-  padding: 8px;
-}
-
-.stat-label,
-.stat-value {
-  display: block;
-  min-width: 0;
-}
-
-.stat-label {
-  color: #909399;
-  font-size: 12px;
-}
-
-.stat-value {
-  color: #303133;
-  font-size: 13px;
-  font-weight: 600;
-  margin-top: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .progress-meta {
@@ -523,6 +439,12 @@ onMounted(fetchDatasets);
   flex-wrap: wrap;
   font-size: 12px;
   margin-top: 8px;
+}
+
+.progress-parts {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 @media (max-width: 768px) {
@@ -541,8 +463,5 @@ onMounted(fetchDatasets);
     flex: 1;
   }
 
-  .progress-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

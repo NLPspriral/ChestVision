@@ -78,8 +78,8 @@ PAI-DLC Train Job
 所有对象 Key 必须由后端生成，前端不得传入任意路径。
 
 ```text
-{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip
-{oss_prefix}/uploads/raw/{user_id}/{upload_id}/client.json
+{oss_prefix}/{user_id}/{upload_id}/dataset.zip
+{oss_prefix}/{user_id}/{upload_id}/client.json
 
 {oss_prefix}/training/jobs/{task_uuid}/
   code/                  # 可选：训练脚本快照
@@ -345,7 +345,7 @@ ACR_PASSWORD=
 
 - 应用服务器使用 RAM 用户或 RAM Role，权限最小化，负责生成上传凭据。
 - 浏览器只拿短期上传凭据，不能拿 AccessKey、SecretKey 或 STS token。
-- 每个上传凭据只绑定单个 `{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip` object key。
+- 每个上传凭据只绑定单个 `{oss_prefix}/{user_id}/{upload_id}/dataset.zip` object key。
 - PAI-DLC 运行角色需要读 raw dataset.zip，写 training output 和 models 前缀。
 
 ## 8. 后端模块划分
@@ -431,7 +431,7 @@ app.include_router(remote_training_router)
 {
   "upload_id": "upl_xxx",
   "bucket": "bucket-name",
-  "object_key": "{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip",
+  "object_key": "{oss_prefix}/{user_id}/{upload_id}/dataset.zip",
   "expires_at": "2026-07-18T10:00:00+08:00",
   "upload_mode": "multipart",
   "server_confirm_event": "oss:ObjectCreated:CompleteMultipartUpload",
@@ -601,7 +601,7 @@ app.include_router(remote_training_router)
   "status": "UPLOADED",
   "dataset_id": "ds_xxx",
   "dataset_name": "chest_xray_v2",
-  "raw_object_key": "{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip",
+  "raw_object_key": "{oss_prefix}/{user_id}/{upload_id}/dataset.zip",
   "actual_size": 2147483648,
   "etag": "...",
   "client_completed_at": "2026-07-20T10:00:12+08:00",
@@ -806,7 +806,7 @@ backend/tools/fc_oss_multipart_complete_handler.py
 输入：
 
 ```text
-RAW_OBJECT_KEY={oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip
+RAW_OBJECT_KEY={oss_prefix}/{user_id}/{upload_id}/dataset.zip
 OUTPUT_PREFIX={oss_prefix}/training/jobs/{task_uuid}/
 DATASET_ID=...
 UPLOAD_ID=...
@@ -838,7 +838,7 @@ CALLBACK_TOKEN=...
   "ok": true,
   "source": {
     "bucket": "bucket-name",
-    "object_key": "{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip",
+    "object_key": "{oss_prefix}/{user_id}/{upload_id}/dataset.zip",
     "etag": "..."
   },
   "format": "yolo",
@@ -865,7 +865,7 @@ Job 类型：
 ```text
 TASK_ID=123
 TASK_UUID=abcd1234
-RAW_OBJECT_KEY={oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip
+RAW_OBJECT_KEY={oss_prefix}/{user_id}/{upload_id}/dataset.zip
 OUTPUT_PREFIX={oss_prefix}/training/jobs/{task_uuid}/
 MODEL_NAME=yolo11n
 EPOCHS=100
@@ -908,7 +908,7 @@ PAI-DLC `CreateJob` 请求核心字段：
   "UserCommand": "python /workspace/train_yolo_remote.py",
   "Envs": {
     "TASK_UUID": "abcd1234",
-    "RAW_OBJECT_KEY": "{oss_prefix}/uploads/raw/{user_id}/{upload_id}/dataset.zip",
+    "RAW_OBJECT_KEY": "{oss_prefix}/{user_id}/{upload_id}/dataset.zip",
     "OUTPUT_PREFIX": "{oss_prefix}/training/jobs/{task_uuid}/"
   },
   "JobMaxRunningTimeMinutes": 720

@@ -304,7 +304,7 @@ class RemoteTrainingService:
         upload_uuid = "upl_" + uuid.uuid4().hex
         dataset_uuid = "ds_" + uuid.uuid4().hex
         base_prefix = _normalize_prefix(self.settings.oss_prefix)
-        raw_key = f"{base_prefix}uploads/raw/{user_id}/{upload_uuid}/dataset.zip"
+        raw_key = f"{base_prefix}{user_id}/{upload_uuid}/dataset.zip"
         expires_at = _now() + timedelta(seconds=self.settings.upload_url_expires_seconds)
 
         upload = DatasetUpload(
@@ -922,7 +922,7 @@ class RemoteTrainingService:
         DLC 会把数据集输入前缀和 output prefix 分别挂载到固定目录。
         当前支持两种输入：
         - processed 前缀下已有 data.yaml。
-        - raw 前缀下只有 dataset.zip，命令先安全解压到容器临时目录。
+        - 数据集对象所在前缀下只有 dataset.zip，命令先安全解压到容器临时目录。
         """
         dataset = self.settings.pai_dataset_mount_path.rstrip("/")
         output = self.settings.pai_output_mount_path.rstrip("/")

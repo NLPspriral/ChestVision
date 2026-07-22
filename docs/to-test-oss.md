@@ -17,7 +17,7 @@ python backend/tools/oss_test.py --case all
 - Object Key 只能由服务端生成。
 - Key 包含 `user_id/upload_id`，不能由前端注入任意路径。
 - dataset_name 只允许字母、数字、下划线、短横线。
-- raw 对象固定为 `uploads/raw/{user_id}/{upload_id}/dataset.zip`。
+- raw 对象固定为 `{user_id}/{upload_id}/dataset.zip`；真实服务会在前面加 `REMOTE_TRAIN_OSS_PREFIX`，例如 `upload/1/upl_xxx/dataset.zip`。
 
 模拟断言：
 

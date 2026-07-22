@@ -202,7 +202,7 @@ class UploadService:
             raise ValidationError("remote upload currently accepts dataset.zip only")
         upload_id = "upl_" + uuid.uuid4().hex[:10]
         dataset_id = "ds_" + uuid.uuid4().hex[:10]
-        raw_key = f"uploads/raw/{user_id}/{upload_id}/dataset.zip"
+        raw_key = f"{user_id}/{upload_id}/dataset.zip"
         metadata = {
             "upload-id": upload_id,
             "user-id": str(user_id),
@@ -477,6 +477,7 @@ def test_happy() -> UploadRecord:
     oss, service = new_service()
     content = make_dataset_zip()
     record, upload = service.create_upload(1, "chest_xray_v2", "dataset.zip", len(content))
+    assert record.raw_object_key == f"1/{record.upload_id}/dataset.zip"
     assert record.raw_object_key in upload["url"]
 
     service.heartbeat(record.upload_id, 33)

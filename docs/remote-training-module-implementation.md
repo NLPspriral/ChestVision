@@ -172,7 +172,7 @@ POST /api/training/remote/uploads
   "upload_id": "upl_xxx",
   "dataset_id": "ds_xxx",
   "status": "INITIATED",
-  "object_key": "{REMOTE_TRAIN_OSS_PREFIX}/uploads/raw/{user_id}/{upload_id}/dataset.zip",
+  "object_key": "{REMOTE_TRAIN_OSS_PREFIX}/{user_id}/{upload_id}/dataset.zip",
   "upload_mode": "multipart",
   "server_confirm_event": "oss:ObjectCreated:CompleteMultipartUpload",
   "multipart": {
@@ -409,11 +409,13 @@ BACKEND_OSS_MULTIPART_CALLBACK_URL=https://api.example.com/api/training/remote/c
 REMOTE_TRAINING_CALLBACK_SECRET=与后端相同的随机长字符串
 BACKEND_BUCKET_NAME_OVERRIDE=可选；后端保存接入点 alias 时填写
 ALLOWED_SOURCE_BUCKETS=可选；事件源 bucket 白名单，逗号分隔
-ALLOWED_OBJECT_PREFIXES=可选；object key 前缀白名单，逗号分隔
+ALLOWED_OBJECT_PREFIXES=可选；object key 前缀白名单，逗号分隔；例如 REMOTE_TRAIN_OSS_PREFIX=upload 时填 upload/
 HTTP_TIMEOUT_SECONDS=10
 ```
 
 如果后端 `OSS_BUCKET` 填的是接入点 alias，而 EventBridge 事件里的 `bucket.name` 是真实 bucket 名，需要设置 `BACKEND_BUCKET_NAME_OVERRIDE` 为后端数据库中保存的同一个 alias，否则后端会因 `bucket + object_key` 匹配失败返回 400。
+
+如果 FC 配置了 `ALLOWED_OBJECT_PREFIXES`，它必须与后端生成的原始 ZIP Object Key 前缀一致。当前原始 ZIP 路径格式为 `{REMOTE_TRAIN_OSS_PREFIX}/{user_id}/{upload_id}/dataset.zip`，因此不应继续使用旧的 `{REMOTE_TRAIN_OSS_PREFIX}/uploads/raw` 前缀。
 
 ## 5. 关键环境变量
 
