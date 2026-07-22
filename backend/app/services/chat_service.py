@@ -45,13 +45,7 @@ def get_or_create_session(
     session_id: Optional[int] = None,
     title: Optional[str] = None,
 ) -> ChatSession:
-    """获取或创建会话
-
-    查找优先级：
-      1. 有合法 session_id → 直接返回
-      2. 无 session_id → 自动续接用户最近一条活跃会话（修复页面刷新丢上下文）
-      3. 无活跃会话 → 创建新会话
-    """
+    """按显式 session_id 获取会话；未传 ID 时始终创建新会话。"""
     db = SessionLocal()
     try:
         if session_id:
@@ -65,25 +59,25 @@ def get_or_create_session(
             )
             if session:
                 return session
-
-        # ── 自动续接最近活跃会话 ──
-        last_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.user_id == user_id,
-                ChatSession.status == "active",
-            )
-            .order_by(desc(ChatSession.last_message_at))
-            .first()
-        )
-        if last_session:
-            logger.info(
-                "自动续接会话: user=%d, session=%d, title=%s",
-                user_id, last_session.id, last_session.title,
-            )
-            return last_session
+            raise ValueError("会话不存在或无权访问")
 
         return create_session(user_id, title)
+    finally:
+        db.close()
+
+
+def get_session(session_id: int, user_id: int) -> Optional[ChatSession]:
+    """获取属于当前用户的会话，不存在时返回 None，且不产生任何写入。"""
+    db = SessionLocal()
+    try:
+        return (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.id == session_id,
+                ChatSession.user_id == user_id,
+            )
+            .first()
+        )
     finally:
         db.close()
 

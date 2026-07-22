@@ -596,9 +596,17 @@ async function quickDetect(type) {
   input.click();
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadPatients();
   agentStore.loadSessions(); // 加载历史会话列表
+  if (agentStore.currentSessionId && agentStore.messages.length === 0) {
+    try {
+      await agentStore.loadSessionMessages(agentStore.currentSessionId);
+    } catch {
+      // 保存的会话已被删除或无权访问，回到真正的新会话状态。
+      agentStore.newChat();
+    }
+  }
   if (agentStore.messages.length === 0) {
     agentStore.addMessage({
       role: "assistant",

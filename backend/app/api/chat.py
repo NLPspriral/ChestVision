@@ -105,6 +105,8 @@ async def chat_stream(
         )
         db_session_id = session.id
         session_uuid = session.session_uuid
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("创建/获取会话失败: %s", str(e))
         raise HTTPException(status_code=500, detail="创建会话失败")
@@ -481,12 +483,8 @@ async def get_messages(
         limit=limit,
         offset=offset,
     )
-    if not messages and not chat_service.get_or_create_session(
-        current_user.id, session_id
-    ):
-        # session 不存在或不属于该用户
-        # get_or_create_session 会为不存在的 session_id 创建新会话，这里额外判断
-        pass
+    if not chat_service.get_session(session_id=session_id, user_id=current_user.id):
+        raise HTTPException(status_code=404, detail="会话不存在或无权访问")
 
     return {
         "session_id": session_id,
@@ -581,6 +579,8 @@ async def multi_agent_chat(
         )
         db_session_id = session.id
         session_uuid = session.session_uuid
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("创建/获取会话失败: %s", str(e))
         raise HTTPException(status_code=500, detail="创建会话失败")
