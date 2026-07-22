@@ -434,9 +434,10 @@ async def detect_single_shortcut(
         result["filename"] = file.filename
 
         # 入库
-        _save_detection_to_db(
+        task = _save_detection_to_db(
             db, current_user, file.filename or "single", result, "single"
         )
+        result["task_id"] = task.id if task else None
         return result
     finally:
         try:
@@ -469,9 +470,10 @@ async def detect_batch_shortcut(
 
         # 入库
         filename_list = [f.filename or "batch" for f in files]
-        _save_detection_to_db(
+        task = _save_detection_to_db(
             db, current_user, ", ".join(filename_list), result, "batch"
         )
+        result["task_id"] = task.id if task else None
         return result
     finally:
         for p in temp_paths:
@@ -499,7 +501,10 @@ async def detect_zip_shortcut(
         result = detection_service.detect_zip(tmp_path, conf=conf)
 
         # 入库
-        _save_detection_to_db(db, current_user, file.filename or "zip", result, "zip")
+        task = _save_detection_to_db(
+            db, current_user, file.filename or "zip", result, "zip"
+        )
+        result["task_id"] = task.id if task else None
         return result
     finally:
         try:
@@ -518,7 +523,7 @@ def _save_detection_to_db(db, current_user, image_path, result, task_type):
         )
         if not scene:
             logger.warning("检测场景不存在，跳过入库")
-            return
+            return None
 
         model_version = (
             db.query(ModelVersion)
@@ -558,7 +563,7 @@ def _save_detection_to_db(db, current_user, image_path, result, task_type):
         if result.get("annotated_image_path"):
             predict_result["annotated_image_path"] = result["annotated_image_path"]
 
-        detection_service.save_detection_task(
+        return detection_service.save_detection_task(
             db=db,
             user_id=current_user.id,
             scene_id=scene.id,
@@ -570,8 +575,4 @@ def _save_detection_to_db(db, current_user, image_path, result, task_type):
         )
     except Exception as e:
         logger.error("快捷检测入库失败: %s", str(e))
-    finally:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+        return None
