@@ -279,31 +279,24 @@
     >
       <el-form :model="trainForm" label-width="120px">
         <el-form-item label="训练数据集">
-          <div
-            style="display: flex; gap: 8px; align-items: center; width: 100%"
+          <el-select
+            v-model="trainForm.dataset_id"
+            filterable
+            clearable
+            :filter-method="filterTrainingDatasets"
+            no-data-text="暂无已上传数据集"
+            no-match-text="没有匹配的数据集"
+            placeholder="输入名称筛选已上传数据集"
+            style="width: 100%"
+            @visible-change="onDatasetSelectVisibleChange"
           >
-            <el-select
-              v-model="trainForm.dataset_id"
-              filterable
-              :filter-method="filterTrainingDatasets"
-              no-data-text="暂无已上传数据集"
-              no-match-text="没有匹配的数据集"
-              placeholder="选择数据集"
-              style="flex: 1"
-              @change="onDatasetChange"
-              @visible-change="onDatasetSelectVisibleChange"
-            >
-              <el-option
-                v-for="ds in filteredTrainingDatasets"
-                :key="ds.upload_id"
-                :label="formatDatasetOption(ds)"
-                :value="ds.dataset_id"
-              />
-            </el-select>
-            <el-button @click="showUploadDataset = true" :icon="Upload"
-              >上传</el-button
-            >
-          </div>
+            <el-option
+              v-for="ds in filteredTrainingDatasets"
+              :key="ds.upload_id"
+              :label="formatDatasetOption(ds)"
+              :value="ds.dataset_id"
+            />
+          </el-select>
           <div
             v-if="selectedDataset"
             style="margin-top: 6px; font-size: 12px; color: #909399"
@@ -519,7 +512,7 @@
 <script setup>
 import { uploadDataset } from "@/api/dataset";
 import request from "@/utils/request";
-import { Plus, Refresh, Upload } from "@element-plus/icons-vue";
+import { Plus, Refresh } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
@@ -987,10 +980,6 @@ async function fetchDatasets() {
   } catch {
     /* ignore */
   }
-}
-
-function onDatasetChange(datasetId) {
-  if (!datasetId) return;
 }
 
 function filterTrainingDatasets(value) {
