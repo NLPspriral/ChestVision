@@ -111,6 +111,7 @@
                     an.node === "detection" ? "🔬" :
                     an.node === "diagnosis" ? "📋" :
                     an.node === "report" ? "📄" :
+                    an.node === "case_analysis" ? "🗂️" :
                     an.node === "qa" ? "📚" : "📝"
                   }}</span>
                   <span class="agent-node-label">{{ an.label }}</span>
@@ -433,6 +434,7 @@ async function sendMsg() {
           detection: "🔬 病灶检测",
           diagnosis: "📋 综合诊断",
           report: "📄 报告生成",
+          case_analysis: "🗂️ 历史病例分析",
           qa: "📚 知识问答",
           summarize: "📝 汇总输出",
         };
