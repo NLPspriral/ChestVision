@@ -763,6 +763,17 @@ async def multi_agent_chat(
                             }
                             yield f"data: {json.dumps({'type': 'detection_card', 'data': card_data}, ensure_ascii=False)}\n\n"
 
+                    # 报告 Agent 只在真实检测任务存在时提供真实下载按钮。
+                    if node_name == "report":
+                        report_task_id = node_output.get("task_id")
+                        if report_task_id and node_output.get("report_result"):
+                            report_event = {
+                                "type": "report_ready",
+                                "task_id": report_task_id,
+                                "pdf_url": f"/api/reports/{report_task_id}/pdf",
+                            }
+                            yield f"data: {json.dumps(report_event, ensure_ascii=False)}\n\n"
+
                     # 最终回复只由 Supervisor 统一回答节点发送
                     if node_name == "supervisor_answer" and node_output.get("final_response"):
                         final_text = node_output["final_response"]

@@ -108,7 +108,8 @@ def _load_detection_from_db(state: dict) -> dict | None:
                 query = query.filter(DetectionTask.id == task_id)
             last_task = query.order_by(DetectionTask.created_at.desc()).first()
 
-            if not last_task or not last_task.total_objects:
+            # 未检出病灶也是有效的已完成检测，同样可生成报告。
+            if not last_task:
                 return None
 
             details = (
@@ -610,6 +611,9 @@ async def report_node(state: dict, llm: ChatOpenAI = None) -> dict:
     patient_context = _get_patient_context(state)
 
     if not detection_result or detection_result.get("total_objects", -1) < 0:
+        detection_result = _load_detection_from_db(state) or {}
+
+    if not detection_result or detection_result.get("total_objects", -1) < 0:
         return {
             "report_result": "暂无检测结果，请先进行胸片检测后再生成报告。",
             "next_agent": "summarize",
@@ -651,6 +655,7 @@ async def report_node(state: dict, llm: ChatOpenAI = None) -> dict:
 
     return {
         "report_result": report_text,
+        "task_id": detection_result.get("task_id") or state.get("task_id"),
         "next_agent": "summarize",
     }
 

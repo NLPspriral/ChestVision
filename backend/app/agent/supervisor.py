@@ -242,6 +242,9 @@ class SupervisorAgent:
                 "组织语言，不要向用户提及路由、子 Agent、内部状态或服务器文件路径。"
                 "本轮专业 Agent 结果均已执行完毕，禁止使用‘正在处理’‘请稍候’‘预计几秒’"
                 "等未完成状态措辞。"
+                "禁止自行编造附件名、下载链接或声称已生成不存在的 PDF。"
+                "只有本轮专业结果中 report_download_available 为 true 时，"
+                "才可告知用户可通过消息下方的按钮下载 PDF。"
                 "若专业结果与明确的历史事实冲突，以系统身份信息、真实检测数据和数据库"
                 "上下文为准。医学结论须说明仅供辅助参考，最终诊断由临床医生结合实际判断。"
             )
@@ -365,6 +368,13 @@ class SupervisorAgent:
             "detection_result": safe_detection,
             "diagnosis_result": state.get("diagnosis_result", {}),
             "report_result": state.get("report_result", ""),
+            "report_download_available": bool(
+                state.get("report_result")
+                and (
+                    state.get("task_id")
+                    or detection.get("task_id")
+                )
+            ),
             "qa_result": state.get("qa_result", ""),
             "knowledge_sources": [
                 {

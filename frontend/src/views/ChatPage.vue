@@ -84,7 +84,7 @@
                   href="#"
                   @click.prevent="downloadReport(msg.downloadPdfUrl)"
                   class="action-link"
-                  >📥 下载/打印报告</a
+                  >📥 下载 PDF 报告</a
                 >
               </div>
               <DetectionResultCard
@@ -270,6 +270,11 @@ const patientList = ref([]);
 const showSessions = ref(true);
 const recommendationVisible = ref(false);
 const recommendationTaskId = ref(null);
+const latestDetectionTaskId = ref(null);
+
+const REPORT_INTENT_PATTERN =
+  /(?:生成|制作|撰写|写|丰富|详细|完整|深度|增强|导出|下载|查看|打开).{0,16}(?:PDF|报告)|(?:PDF|报告).{0,16}(?:生成|制作|撰写|写|丰富|详细|完整|深度|增强|导出|下载|查看|打开)/i;
+const REPORT_REFINEMENT_PATTERN = /(?:再|更)(?:详细|丰富|完整|深入)|补充.{0,8}(?:分析|建议|内容)/;
 
 function scrollBottom() {
   nextTick(() => {
@@ -328,15 +333,23 @@ async function sendMsg() {
   inputText.value = "";
   selectedFiles.value = [];
 
-  // ── "生成报告" 快捷操作（保留直接调用）──
-  if (text.includes("生成报告") && !files.length) {
+  // ── PDF/报告意图：必须调用真实报告 API，不让模型虚构附件 ──
+  if (
+    (REPORT_INTENT_PATTERN.test(text) ||
+      (latestDetectionTaskId.value && REPORT_REFINEMENT_PATTERN.test(text))) &&
+    !files.length
+  ) {
     agentStore.addMessage({ role: "assistant", content: "", loading: true });
     scrollBottom();
     try {
-      const res = await request.post("/reports/generate", { task_id: 0 });
+      const res = await request.post("/reports/generate", {
+        task_id: latestDetectionTaskId.value || 0,
+        instructions: text,
+      });
       const aiMsg = agentStore.messages[agentStore.messages.length - 1];
       aiMsg.content = res.content;
-      aiMsg.downloadPdfUrl = `/api/reports/${res.id}/pdf`;
+      aiMsg.downloadPdfUrl = res.pdf_url;
+      latestDetectionTaskId.value = res.task_id;
       aiMsg.loading = false;
     } catch (e) {
       const aiMsg = agentStore.messages[agentStore.messages.length - 1];
@@ -426,9 +439,20 @@ async function sendMsg() {
       else if (data.type === "detection_card") {
         const result = data.data || {};
         last.detectionResult = result;
+        if (result.task_id) {
+          latestDetectionTaskId.value = result.task_id;
+        }
         if (result.total_objects > 0 && result.task_id) {
           recommendationTaskId.value = result.task_id;
           recommendationVisible.value = true;
+        }
+        scrollBottom();
+      }
+      // ── 真实 PDF 已由报告 Agent 生成 ──
+      else if (data.type === "report_ready") {
+        last.downloadPdfUrl = data.pdf_url;
+        if (data.task_id) {
+          latestDetectionTaskId.value = data.task_id;
         }
         scrollBottom();
       }
@@ -482,14 +506,44 @@ async function loadPatients() {
 }
 
 async function downloadReport(url) {
-  const token = localStorage.getItem("chestx_token");
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const html = await res.text();
-  const win = window.open("", "_blank");
-  win.document.write(html);
-  win.document.close();
+  try {
+    const token = localStorage.getItem("chestx_token");
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        detail = (await res.json()).detail || detail;
+      } catch {
+        // 非 JSON 错误响应，使用 HTTP 状态码。
+      }
+      throw new Error(detail);
+    }
+
+    const blob = await res.blob();
+    if (blob.type !== "application/pdf") {
+      throw new Error("服务端未返回 PDF 文件");
+    }
+
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const fallbackName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const filename = encodedName
+      ? decodeURIComponent(encodedName)
+      : fallbackName || "ChestVision_胸片分析报告.pdf";
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    ElMessage.success("PDF 报告已下载");
+  } catch (error) {
+    ElMessage.error(`PDF 下载失败：${error.message}`);
+  }
 }
 
 function stopChat() {
@@ -581,6 +635,11 @@ async function quickDetect(type) {
           : "检测完成，未发现明显病灶";
       last.loading = false;
       last.detectionResult = result;
+      const completedTaskId =
+        recommendableResult?.task_id || result.task_id || null;
+      if (completedTaskId) {
+        latestDetectionTaskId.value = completedTaskId;
+      }
       if (recommendableResult) {
         recommendationTaskId.value = recommendableResult.task_id;
         recommendationVisible.value = true;
@@ -619,6 +678,7 @@ onMounted(async () => {
 /** 新建对话 */
 function startNewChat() {
   agentStore.newChat();
+  latestDetectionTaskId.value = null;
   showSessions.value = false;
   agentStore.addMessage({
     role: "assistant",
@@ -631,6 +691,7 @@ function startNewChat() {
 async function switchToSession(sessionId) {
   try {
     await agentStore.switchSession(sessionId);
+    latestDetectionTaskId.value = null;
     showSessions.value = false;
     scrollBottom();
   } catch {

@@ -163,6 +163,7 @@ async def run_graph_stream(
     产出事件类型：
       - {"type": "thinking", "content": "..."}    — 路由/节点切换
       - {"type": "detection_card", "data": {...}} — 检测完成（含标注图）
+      - {"type": "report_ready", "pdf_url": "..."} — 真实 PDF 已可下载
       - {"type": "text_chunk", "content": "..."}  — 最终回复文本片段
       - {"type": "done"}                           — 完成（调用方补充 session 信息）
       - {"type": "error", "content": "..."}        — 错误
@@ -218,6 +219,20 @@ async def run_graph_stream(
                             card_data["detections"] = last.get("detections", card_data["detections"])
                             clr()
                         yield {"type": "detection_card", "data": card_data}
+
+                # ── 报告节点完成 → 只在有真实检测任务时附加 PDF 下载地址 ──
+                if node_name == "report":
+                    report_task_id = (
+                        node_output.get("task_id")
+                        or accumulated_state.get("task_id")
+                        or (accumulated_state.get("detection_result") or {}).get("task_id")
+                    )
+                    if report_task_id and node_output.get("report_result"):
+                        yield {
+                            "type": "report_ready",
+                            "task_id": report_task_id,
+                            "pdf_url": f"/api/reports/{report_task_id}/pdf",
+                        }
 
                 # ── Supervisor 最终回答节点 → 收集最终回复 ──
                 if node_name == "supervisor_answer":
