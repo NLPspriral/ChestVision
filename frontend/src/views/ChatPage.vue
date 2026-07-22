@@ -1,211 +1,49 @@
 ﻿<template>
-  <div class="chat-page">
-    <!-- 左侧：会话列表 -->
-    <div :class="['chat-sessions-panel', { collapsed: !showSessions }]">
-      <div class="sessions-header">
-        <h3>对话记录</h3>
-        <el-button size="small" type="primary" @click="startNewChat"
-          >+ 新建对话</el-button
-        >
-      </div>
-      <div class="sessions-list" v-loading="agentStore.sessionsLoading">
-        <div
-          v-for="s in agentStore.sessions"
-          :key="s.id"
-          :class="[
-            'session-row',
-            { active: s.id === agentStore.currentSessionId },
-          ]"
-          @click="switchToSession(s.id)"
-        >
-          <div class="session-row-title">{{ s.title }}</div>
-          <div class="session-row-meta">{{ s.message_count }} 条消息</div>
-        </div>
-        <div
-          v-if="!agentStore.sessions.length && !agentStore.sessionsLoading"
-          class="sessions-empty"
-        >
-          暂无对话记录
-        </div>
-      </div>
-    </div>
+  <div class="chat-page" :class="{ 'welcome-mode': !hasMessages }">
+    <!-- ═══════════════════════════════════════════════════
+         欢迎页：首次进入，无对话消息时显示
+         ═══════════════════════════════════════════════════ -->
+    <div v-if="!hasMessages" class="welcome-screen">
+      <div class="welcome-content">
+        <div class="welcome-logo">🫁</div>
+        <h1 class="welcome-greeting">你好，{{ userStore.username }}</h1>
+        <p class="welcome-tagline">开启智能医疗问答</p>
+        <p class="welcome-desc">
+          我是
+          <strong>ChestVision</strong>
+          智能影像分析平台，<br />基于深度学习辅助胸部 X 光影像诊断
+        </p>
 
-    <!-- 右侧：聊天区 -->
-    <div class="chat-main">
-      <!-- 折叠按钮 -->
-      <div
-        class="session-toggle-btn"
-        @click="showSessions = !showSessions"
-        :title="showSessions ? '收起对话列表' : '展开对话列表'"
-      >
-        <span>{{ showSessions ? "◀" : "▶" }}</span>
-      </div>
-      <!-- 消息列表 -->
-      <div class="chat-messages" ref="msgListRef">
-        <div
-          v-for="(msg, i) in agentStore.messages"
-          :key="i"
-          :class="['msg-row', `msg-${msg.role}`]"
-        >
-          <div class="msg-avatar" v-if="msg.role === 'assistant'">
-            <span class="avatar-bot">🫁</span>
+        <!-- 快捷提问 -->
+        <div class="welcome-suggestions">
+          <div
+            class="suggestion-item"
+            @click="sendSuggestion('帮我分析一张胸片')"
+          >
+            <span class="sug-icon">🔬</span>
+            <span>上传胸片进行 AI 分析</span>
           </div>
-          <div class="msg-body">
-            <div class="msg-meta">
-              <span class="msg-sender">{{
-                msg.role === "user" ? "我" : "ChestVision AI"
-              }}</span>
-            </div>
-            <div
-              :class="[
-                'msg-bubble',
-                msg.role === 'user' ? 'user-bubble' : 'assistant-bubble',
-              ]"
-            >
-              <div v-if="msg.role === 'user'" class="msg-text">
-                {{ msg.content }}
-              </div>
-              <div v-if="msg.image" class="msg-attachment">
-                <img :src="msg.imagePreview" alt="附件" />
-              </div>
-              <div
-                v-if="msg.role === 'assistant' && msg.loading"
-                class="typing-indicator"
-              >
-                <span></span><span></span><span></span>
-              </div>
-              <div
-                v-else-if="msg.role === 'assistant'"
-                class="msg-text markdown-body"
-                v-html="renderMd(msg.content)"
-              ></div>
-              <div v-if="msg.downloadPdfUrl" class="msg-actions">
-                <a
-                  href="#"
-                  @click.prevent="downloadReport(msg.downloadPdfUrl)"
-                  class="action-link"
-                  >📥 下载 PDF 报告</a
-                >
-              </div>
-              <DetectionResultCard
-                v-if="msg.detectionResult"
-                :result="msg.detectionResult"
-              />
-            </div>
-
-            <!-- Multi-Agent 节点流程可视化 -->
-            <div
-              v-if="msg.agentNodes && msg.agentNodes.length"
-              class="agent-nodes-area"
-            >
-              <div class="agent-flow-label">🤖 Multi-Agent 协作流程</div>
-              <div class="agent-flow">
-                <div
-                  v-for="(an, idx) in msg.agentNodes"
-                  :key="idx"
-                  class="agent-node-badge"
-                  :class="an.status"
-                >
-                  <span class="agent-node-icon">{{
-                    an.node === "supervisor" || an.node === "supervisor_answer" ? "🧠" :
-                    an.node === "detection" ? "🔬" :
-                    an.node === "diagnosis" ? "📋" :
-                    an.node === "report" ? "📄" :
-                    an.node === "qa" ? "📚" : "📝"
-                  }}</span>
-                  <span class="agent-node-label">{{ an.label }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 工具调用可视化 -->
-            <div
-              v-if="msg.toolCalls && msg.toolCalls.length"
-              class="tool-calls-area"
-            >
-              <div
-                v-for="(tc, idx) in msg.toolCalls"
-                :key="idx"
-                class="tool-call-row"
-                :class="{ loading: tc.status === 'loading' }"
-              >
-                <span v-if="tc.status === 'loading'" class="tool-spinner"
-                  >⏳</span
-                >
-                <span v-else class="tool-done">✅</span>
-                <span class="tool-label">{{ getToolLabel(tc.tool) }}</span>
-                <span class="tool-summary">{{ tc.summary || "..." }}</span>
-              </div>
-            </div>
-
-            <!-- 知识来源显示 -->
-            <div
-              v-if="msg.knowledgeSources && msg.knowledgeSources.length"
-              class="knowledge-sources-info"
-            >
-              <span class="kb-icon">📚</span>
-              <span class="kb-label">知识库检索结果：</span>
-              <span
-                v-for="(src, idx) in msg.knowledgeSources"
-                :key="idx"
-                class="kb-source-tag"
-                >{{ src.title || src.source }}</span
-              >
-            </div>
-            <div
-              v-else-if="msg.hasKnowledge === false"
-              class="knowledge-sources-info no-kb"
-            >
-              <span class="kb-icon">💡</span>
-              <span>回答来自大模型（知识库暂无相关内容）</span>
-            </div>
+          <div
+            class="suggestion-item"
+            @click="sendSuggestion('胸部 X 光常见病变有哪些？')"
+          >
+            <span class="sug-icon">📚</span>
+            <span>了解胸部常见病变</span>
+          </div>
+          <div class="suggestion-item" @click="sendSuggestion('你能做什么？')">
+            <span class="sug-icon">✨</span>
+            <span>你能做什么</span>
           </div>
         </div>
-      </div>
 
-      <!-- 输入区 -->
-      <div class="chat-input-bar">
-        <!-- 快捷操作 -->
-        <div class="quick-actions">
-          <el-select
-            v-if="
-              userStore.userType === 'doctor' || userStore.userType === 'admin'
-            "
-            v-model="selectedPatientId"
-            placeholder="选择患者（可选）"
-            clearable
-            size="small"
-            style="width: 200px"
-            @change="onPatientChange"
-          >
-            <el-option
-              v-for="p in patientList"
-              :key="p.id"
-              :label="`${p.patient_code} ${p.real_name || p.username}`"
-              :value="p.id"
-            />
-          </el-select>
-          <el-button
-            size="small"
-            @click="quickDetect('single')"
-            :disabled="agentStore.isLoading"
-            >📷 单图检测</el-button
-          >
-          <el-button
-            size="small"
-            @click="quickDetect('batch')"
-            :disabled="agentStore.isLoading"
-            >📁 批量/ZIP</el-button
-          >
-        </div>
-        <!-- 输入框 -->
-        <div class="input-row">
+        <!-- 输入区 -->
+        <div class="welcome-input-row">
           <el-button
             class="attach-btn"
             @click="triggerFile"
             :disabled="agentStore.isLoading"
             circle
-            >📎</el-button
+            >＋</el-button
           >
           <input
             ref="fileInputRef"
@@ -216,13 +54,15 @@
           />
           <el-input
             v-model="inputText"
-            placeholder="输入消息，或上传胸片进行AI分析..."
+            placeholder="输入您的问题，或上传胸片进行 AI 分析..."
             size="large"
             @keyup.enter.exact="sendMsg"
             :disabled="agentStore.isLoading"
+            class="welcome-input"
           >
             <template #append>
               <el-button
+                class="send-btn"
                 @click="sendMsg"
                 :loading="agentStore.isLoading"
                 type="primary"
@@ -233,6 +73,254 @@
         </div>
       </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════
+         正常对话模式：左侧会话列表 + 右侧聊天区
+         ═══════════════════════════════════════════════════ -->
+    <template v-else>
+      <!-- 左侧：会话列表 -->
+      <div :class="['chat-sessions-panel', { collapsed: !showSessions }]">
+        <div class="sessions-header">
+          <h3>对话记录</h3>
+          <el-button size="small" type="primary" @click="startNewChat"
+            >+ 新建对话</el-button
+          >
+        </div>
+        <div class="sessions-list" v-loading="agentStore.sessionsLoading">
+          <div
+            v-for="s in agentStore.sessions"
+            :key="s.id"
+            :class="[
+              'session-row',
+              { active: s.id === agentStore.currentSessionId },
+            ]"
+            @click="switchToSession(s.id)"
+          >
+            <div class="session-row-title">{{ s.title }}</div>
+            <div class="session-row-meta">{{ s.message_count }} 条消息</div>
+          </div>
+          <div
+            v-if="!agentStore.sessions.length && !agentStore.sessionsLoading"
+            class="sessions-empty"
+          >
+            暂无对话记录
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：聊天区 -->
+      <div class="chat-main">
+        <!-- 折叠按钮 -->
+        <div
+          class="session-toggle-btn"
+          @click="showSessions = !showSessions"
+          :title="showSessions ? '收起对话列表' : '展开对话列表'"
+        >
+          <span>{{ showSessions ? "◀" : "▶" }}</span>
+        </div>
+        <!-- 消息列表 -->
+        <div class="chat-messages" ref="msgListRef">
+          <div
+            v-for="(msg, i) in agentStore.messages"
+            :key="i"
+            :class="['msg-row', `msg-${msg.role}`]"
+          >
+            <div class="msg-avatar" v-if="msg.role === 'assistant'">
+              <span class="avatar-bot">🫁</span>
+            </div>
+            <div class="msg-body">
+              <div class="msg-meta">
+                <span class="msg-sender">{{
+                  msg.role === "user" ? "我" : "ChestVision AI"
+                }}</span>
+              </div>
+              <div
+                :class="[
+                  'msg-bubble',
+                  msg.role === 'user' ? 'user-bubble' : 'assistant-bubble',
+                ]"
+              >
+                <div v-if="msg.role === 'user'" class="msg-text">
+                  {{ msg.content }}
+                </div>
+                <div v-if="msg.image" class="msg-attachment">
+                  <img :src="msg.imagePreview" alt="附件" />
+                </div>
+                <div
+                  v-if="msg.role === 'assistant' && msg.loading"
+                  class="typing-indicator"
+                >
+                  <span></span><span></span><span></span>
+                </div>
+                <div
+                  v-else-if="msg.role === 'assistant'"
+                  class="msg-text markdown-body"
+                  v-html="renderMd(msg.content)"
+                ></div>
+                <div v-if="msg.downloadPdfUrl" class="msg-actions">
+                  <a
+                    href="#"
+                    @click.prevent="downloadReport(msg.downloadPdfUrl)"
+                    class="action-link"
+                    >📥 下载 PDF 报告</a
+                  >
+                </div>
+                <DetectionResultCard
+                  v-if="msg.detectionResult"
+                  :result="msg.detectionResult"
+                />
+              </div>
+
+              <!-- Multi-Agent 节点流程可视化 -->
+              <div
+                v-if="msg.agentNodes && msg.agentNodes.length"
+                class="agent-nodes-area"
+              >
+                <div class="agent-flow-label">🤖 Multi-Agent 协作流程</div>
+                <div class="agent-flow">
+                  <div
+                    v-for="(an, idx) in msg.agentNodes"
+                    :key="idx"
+                    class="agent-node-badge"
+                    :class="an.status"
+                  >
+                    <span class="agent-node-icon">{{
+                      an.node === "supervisor" ||
+                      an.node === "supervisor_answer"
+                        ? "🧠"
+                        : an.node === "detection"
+                          ? "🔬"
+                          : an.node === "diagnosis"
+                            ? "📋"
+                            : an.node === "report"
+                              ? "📄"
+                              : an.node === "qa"
+                                ? "📚"
+                                : "📝"
+                    }}</span>
+                    <span class="agent-node-label">{{ an.label }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 工具调用可视化 -->
+              <div
+                v-if="msg.toolCalls && msg.toolCalls.length"
+                class="tool-calls-area"
+              >
+                <div
+                  v-for="(tc, idx) in msg.toolCalls"
+                  :key="idx"
+                  class="tool-call-row"
+                  :class="{ loading: tc.status === 'loading' }"
+                >
+                  <span v-if="tc.status === 'loading'" class="tool-spinner"
+                    >⏳</span
+                  >
+                  <span v-else class="tool-done">✅</span>
+                  <span class="tool-label">{{ getToolLabel(tc.tool) }}</span>
+                  <span class="tool-summary">{{ tc.summary || "..." }}</span>
+                </div>
+              </div>
+
+              <!-- 知识来源显示 -->
+              <div
+                v-if="msg.knowledgeSources && msg.knowledgeSources.length"
+                class="knowledge-sources-info"
+              >
+                <span class="kb-icon">📚</span>
+                <span class="kb-label">知识库检索结果：</span>
+                <span
+                  v-for="(src, idx) in msg.knowledgeSources"
+                  :key="idx"
+                  class="kb-source-tag"
+                  >{{ src.title || src.source }}</span
+                >
+              </div>
+              <div
+                v-else-if="msg.hasKnowledge === false"
+                class="knowledge-sources-info no-kb"
+              >
+                <span class="kb-icon">💡</span>
+                <span>回答来自大模型（知识库暂无相关内容）</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="chat-input-bar">
+          <!-- 快捷操作 -->
+          <div class="quick-actions">
+            <el-select
+              v-if="
+                userStore.userType === 'doctor' ||
+                userStore.userType === 'admin'
+              "
+              v-model="selectedPatientId"
+              placeholder="选择患者（可选）"
+              clearable
+              size="small"
+              style="width: 200px"
+              @change="onPatientChange"
+            >
+              <el-option
+                v-for="p in patientList"
+                :key="p.id"
+                :label="`${p.patient_code} ${p.real_name || p.username}`"
+                :value="p.id"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              @click="quickDetect('single')"
+              :disabled="agentStore.isLoading"
+              >📷 单图检测</el-button
+            >
+            <el-button
+              size="small"
+              @click="quickDetect('batch')"
+              :disabled="agentStore.isLoading"
+              >📁 批量/ZIP</el-button
+            >
+          </div>
+          <!-- 输入框 -->
+          <div class="input-row">
+            <el-button
+              class="attach-btn"
+              @click="triggerFile"
+              :disabled="agentStore.isLoading"
+              circle
+              >＋</el-button
+            >
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="onFileSelect"
+            />
+            <el-input
+              v-model="inputText"
+              placeholder="输入消息，或上传胸片进行AI分析..."
+              size="large"
+              @keyup.enter.exact="sendMsg"
+              :disabled="agentStore.isLoading"
+            >
+              <template #append>
+                <el-button
+                  class="send-btn"
+                  @click="sendMsg"
+                  :loading="agentStore.isLoading"
+                  type="primary"
+                  >发送</el-button
+                >
+              </template>
+            </el-input>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <DoctorRecommendationDialog
       v-model="recommendationVisible"
@@ -255,12 +343,15 @@ import request from "@/utils/request";
 import { streamChat } from "@/utils/stream";
 import { ElMessage, ElMessageBox } from "element-plus";
 import MarkdownIt from "markdown-it";
-import { nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 
 const md = new MarkdownIt({ breaks: true, html: false });
 
 const agentStore = useAgentStore();
 const userStore = useUserStore();
+
+/** 是否有用户对话消息（决定显示欢迎页还是对话页） */
+const hasMessages = computed(() => agentStore.messages.length > 0);
 const inputText = ref("");
 const selectedFiles = ref([]);
 const msgListRef = ref(null);
@@ -274,7 +365,8 @@ const latestDetectionTaskId = ref(null);
 
 const REPORT_INTENT_PATTERN =
   /(?:生成|制作|撰写|写|丰富|详细|完整|深度|增强|导出|下载|查看|打开).{0,16}(?:PDF|报告)|(?:PDF|报告).{0,16}(?:生成|制作|撰写|写|丰富|详细|完整|深度|增强|导出|下载|查看|打开)/i;
-const REPORT_REFINEMENT_PATTERN = /(?:再|更)(?:详细|丰富|完整|深入)|补充.{0,8}(?:分析|建议|内容)/;
+const REPORT_REFINEMENT_PATTERN =
+  /(?:再|更)(?:详细|丰富|完整|深入)|补充.{0,8}(?:分析|建议|内容)/;
 
 function scrollBottom() {
   nextTick(() => {
@@ -300,6 +392,12 @@ function onFileSelect(e) {
 
 function renderMd(text) {
   return md.render(text || "");
+}
+
+/** 欢迎页快捷提问 */
+function sendSuggestion(text) {
+  inputText.value = text;
+  sendMsg();
 }
 
 // Day11: 工具名称中文映射
@@ -362,7 +460,12 @@ async function sendMsg() {
   }
 
   // AI 加载占位
-  agentStore.addMessage({ role: "assistant", content: "", loading: true, agentNodes: [] });
+  agentStore.addMessage({
+    role: "assistant",
+    content: "",
+    loading: true,
+    agentNodes: [],
+  });
   scrollBottom();
 
   // ── 有图片：先上传，再走 Multi-Agent ──
@@ -612,21 +715,25 @@ async function quickDetect(type) {
         recommendableResult = results.find(
           (item) => item.total_objects > 0 && item.task_id,
         );
-        result = results.length === 1
-          ? {
-              ...results[0],
-              detections: results[0].objects,
-              inference_time: results[0].inference_time_ms,
-            }
-          : {
-              total_objects: results.reduce((sum, item) => sum + item.total_objects, 0),
-              detections: results.flatMap((item) => item.objects),
-              inference_time: results.reduce(
-                (sum, item) => sum + item.inference_time_ms,
-                0,
-              ),
-              annotated_image_base64: "",
-            };
+        result =
+          results.length === 1
+            ? {
+                ...results[0],
+                detections: results[0].objects,
+                inference_time: results[0].inference_time_ms,
+              }
+            : {
+                total_objects: results.reduce(
+                  (sum, item) => sum + item.total_objects,
+                  0,
+                ),
+                detections: results.flatMap((item) => item.objects),
+                inference_time: results.reduce(
+                  (sum, item) => sum + item.inference_time_ms,
+                  0,
+                ),
+                annotated_image_base64: "",
+              };
       }
       const last = agentStore.messages[agentStore.messages.length - 1];
       last.content =
@@ -667,11 +774,7 @@ onMounted(async () => {
     }
   }
   if (agentStore.messages.length === 0) {
-    agentStore.addMessage({
-      role: "assistant",
-      content:
-        "你好！我是**胸片X光AI辅助诊断助手** 🫁\n\n我可以帮你：\n- 📷 上传胸片进行 AI 病灶检测\n- 📁 批量检测多张胸片或 ZIP 包\n- 💬 自然语言分析解读检测结果\n\n支持 10 种胸部病变：肺不张、钙化、实变、积液、肺气肿、纤维化、骨折、肿块、结节、气胸\n\n---\n*请上传胸片或输入消息开始*",
-    });
+    // 欢迎页模式：不添加初始消息，显示居中欢迎界面
   }
 });
 
@@ -680,11 +783,6 @@ function startNewChat() {
   agentStore.newChat();
   latestDetectionTaskId.value = null;
   showSessions.value = false;
-  agentStore.addMessage({
-    role: "assistant",
-    content:
-      "你好！我是**胸片X光AI辅助诊断助手** 🫁\n\n我可以帮你：\n- 📷 上传胸片进行 AI 病灶检测\n- 📁 批量检测多张胸片或 ZIP 包\n- 💬 自然语言分析解读检测结果\n\n---\n*请上传胸片或输入消息开始*",
-  });
 }
 
 /** 切换到历史会话 */
@@ -715,12 +813,200 @@ async function handleDeleteSession(sessionId) {
 
 <style lang="scss" scoped>
 /* ═══════════════════════════════════════════════════════
-   三栏布局：会话列表 | 聊天区
+   整体布局
    ═══════════════════════════════════════════════════════ */
 .chat-page {
   display: flex;
   height: 100%;
   background: $bg-color;
+
+  &.welcome-mode {
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(
+        ellipse 700px 500px at 10% 15%,
+        rgba(42, 157, 143, 0.1) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        ellipse 500px 400px at 90% 85%,
+        rgba(42, 157, 143, 0.08) 0%,
+        transparent 50%
+      ),
+      linear-gradient(180deg, #f0faf7 0%, $bg-color 60%);
+    position: relative;
+    overflow: hidden;
+
+    /* 胸片网格纹理 */
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(
+        circle,
+        rgba(42, 157, 143, 0.06) 1px,
+        transparent 1px
+      );
+      background-size: 32px 32px;
+      pointer-events: none;
+    }
+
+    /* 右下角装饰环 */
+    &::after {
+      content: "";
+      position: absolute;
+      bottom: -80px;
+      right: -60px;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(42, 157, 143, 0.12);
+      pointer-events: none;
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   欢迎页
+   ═══════════════════════════════════════════════════════ */
+.welcome-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 40px;
+}
+
+.welcome-content {
+  text-align: center;
+  max-width: 640px;
+  width: 100%;
+  animation: welcomeFadeIn 0.6s ease;
+}
+
+@keyframes welcomeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-logo {
+  font-size: 56px;
+  margin-bottom: 20px;
+  animation: logoPulse 2s ease-in-out infinite;
+}
+
+@keyframes logoPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+.welcome-greeting {
+  font-size: 28px;
+  font-weight: 700;
+  color: $text-primary;
+  margin: 0 0 8px;
+}
+
+.welcome-tagline {
+  font-size: 16px;
+  color: $primary-color;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.welcome-desc {
+  font-size: 15px;
+  color: $text-secondary;
+  line-height: 1.7;
+  margin: 0 0 32px;
+
+  strong {
+    color: $primary-dark;
+  }
+}
+
+/* ── 快捷提问卡片 ── */
+.welcome-suggestions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #fff;
+  border: 1px solid #e8ecf0;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: $text-regular;
+  transition: all 0.25s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+
+  &:hover {
+    border-color: $primary-color;
+    color: $primary-color;
+    box-shadow: 0 4px 14px rgba(42, 157, 143, 0.12);
+    transform: translateY(-2px);
+  }
+
+  .sug-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+}
+
+/* ── 欢迎页输入区 ── */
+.welcome-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 720px;
+  margin: 0 auto;
+
+  .attach-btn {
+    flex-shrink: 0;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #e0e4e8;
+    background: #fff;
+    font-size: 20px;
+    font-weight: 300;
+    color: $text-secondary;
+    transition: all 0.2s;
+    &:hover {
+      border-color: $primary-color;
+      color: $primary-color;
+    }
+  }
+
+  .welcome-input {
+    flex: 1;
+  }
+
+  :deep(.send-btn) {
+    color: #fff !important;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
 }
 
 /* ── 左侧会话列表 ── */
@@ -990,6 +1276,12 @@ async function handleDeleteSession(sessionId) {
   padding: 12px 40px 20px;
   background: #fff;
   border-top: 1px solid #f0f2f5;
+
+  :deep(.send-btn) {
+    color: #fff !important;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
 }
 
 .tool-calls-area {
@@ -1130,7 +1422,12 @@ async function handleDeleteSession(sessionId) {
 }
 
 @keyframes nodePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 </style>
