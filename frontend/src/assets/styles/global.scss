@@ -26,25 +26,25 @@ body {
 }
 
 // ── Element Plus 卡片覆盖 ──────────────────────────
-:deep(.el-card) {
+.el-card {
   border-radius: $border-radius-lg !important;
   border: none !important;
   box-shadow: $shadow-sm !important;
   transition: box-shadow 0.3s ease;
   &:hover { box-shadow: $shadow-md !important; }
 }
-:deep(.el-card__header) {
+.el-card__header {
   border-bottom: 1px solid #f0f0f0;
   padding: $spacing-md $spacing-xl;
   font-weight: 600;
   color: $text-primary;
 }
-:deep(.el-card__body) {
+.el-card__body {
   padding: $spacing-xl;
 }
 
 // ── 表格（无竖线 + 细横线 + 悬浮高亮）─────────────
-:deep(.el-table) {
+.el-table {
   --el-table-border-color: transparent;
   border: none !important;
   th.el-table__cell {
@@ -67,7 +67,7 @@ body {
 }
 
 // ── 状态徽章（药丸形状）────────────────────────────
-:deep(.el-tag) {
+.el-tag {
   border-radius: 20px;
   border: none;
   font-weight: 500;
@@ -75,18 +75,18 @@ body {
 }
 
 // ── 输入框覆盖 ──────────────────────────────────────
-:deep(.el-input__wrapper) {
+.el-input__wrapper {
   border-radius: $border-radius-sm !important;
   background: #f8fafb;
   transition: all 0.25s;
 }
-:deep(.el-input__wrapper.is-focus) {
+.el-input__wrapper.is-focus {
   border-color: $primary-color !important;
   box-shadow: 0 0 0 3px rgba(42,157,143,0.1) !important;
 }
 
 // ── 按钮覆盖 ────────────────────────────────────────
-:deep(.el-button--primary) {
+.el-button--primary {
   border-radius: $border-radius-sm;
   background: linear-gradient(135deg, $primary-dark, $primary-color);
   border: none;
@@ -95,33 +95,33 @@ body {
   &:hover { box-shadow: 0 4px 16px rgba(42,157,143,0.3); transform: translateY(-1px); }
   &:active { transform: scale(0.97); }
 }
-:deep(.el-button) {
+.el-button {
   border-radius: $border-radius-sm;
   font-weight: 500;
 }
 
 // ── 对话框覆盖 ──────────────────────────────────────
-:deep(.el-dialog) {
+.el-dialog {
   border-radius: $border-radius-lg;
 }
-:deep(.el-dialog__header) {
+.el-dialog__header {
   padding: $spacing-lg $spacing-xl 0;
 }
-:deep(.el-dialog__body) {
+.el-dialog__body {
   padding: $spacing-lg $spacing-xl;
 }
 
 // ── 分页覆盖 ────────────────────────────────────────
-:deep(.el-pagination) {
+.el-pagination {
   margin-top: $spacing-lg;
 }
 
 // ── 进度条覆盖 ──────────────────────────────────────
-:deep(.el-progress-bar__outer) {
+.el-progress-bar__outer {
   border-radius: 8px;
   background: #eef1f5;
 }
-:deep(.el-progress-bar__inner) {
+.el-progress-bar__inner {
   border-radius: 8px;
 }
 
