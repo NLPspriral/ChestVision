@@ -53,6 +53,7 @@
 <script setup>
 import { useUserStore } from "@/stores/user";
 import {
+  Box,
   Camera,
   ChatDotRound,
   Clock,
@@ -120,6 +121,7 @@ const allMenuItems = [
     icon: FolderOpened,
     roles: ["admin"],
   },
+  { path: "/models", title: "模型管理", icon: Box, roles: ["admin"] },
 ];
 
 const menuItems = computed(() =>

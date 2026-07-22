@@ -65,70 +65,6 @@
       </el-table>
     </el-card>
 
-    <!-- 模型版本管理 — 全局默认模型切换 -->
-    <el-card class="model-versions-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>📦 模型版本管理（全局默认模型）</span>
-          <el-button text @click="fetchModelVersions">
-            <el-icon><Refresh /></el-icon>刷新
-          </el-button>
-        </div>
-      </template>
-      <el-table
-        :data="modelVersions"
-        stripe
-        v-loading="loadingVersions"
-        empty-text="暂无模型版本，请先训练并导出模型"
-      >
-        <el-table-column label="默认" width="70">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_default" type="success" size="small"
-              >当前使用</el-tag
-            >
-          </template>
-        </el-table-column>
-        <el-table-column prop="model_name" label="模型名称" min-width="160" />
-        <el-table-column prop="version" label="版本" width="90" />
-        <el-table-column label="mAP@50" width="100">
-          <template #default="{ row }">
-            <span :style="{ color: row.map50 ? '#67c23a' : '#909399' }">
-              {{ row.map50 ? (row.map50 * 100).toFixed(1) + "%" : "-" }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="mAP@50-95" width="110">
-          <template #default="{ row }">
-            {{ row.map50_95 ? (row.map50_95 * 100).toFixed(1) + "%" : "-" }}
-          </template>
-        </el-table-column>
-        <el-table-column label="大小" width="90">
-          <template #default="{ row }">
-            {{
-              row.file_size
-                ? (row.file_size / 1024 / 1024).toFixed(1) + "MB"
-                : "-"
-            }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170" />
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="!row.is_default"
-              size="small"
-              type="primary"
-              @click="setDefaultModel(row.id)"
-              :loading="settingDefault === row.id"
-            >
-              设为当前使用
-            </el-button>
-            <el-tag v-else type="success" size="small">已是默认</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
     <el-card v-if="selectedTask" class="monitor-card" shadow="never">
       <template #header>
         <div class="card-header">
@@ -301,24 +237,28 @@
     >
       <el-form :model="trainForm" label-width="120px">
         <el-form-item label="训练数据集">
-          <el-select
-            v-model="trainForm.dataset_id"
-            filterable
-            clearable
-            :filter-method="filterTrainingDatasets"
-            no-data-text="暂无已上传数据集"
-            no-match-text="没有匹配的数据集"
-            placeholder="输入名称筛选已上传数据集"
-            style="width: 100%"
-            @visible-change="onDatasetSelectVisibleChange"
-          >
-            <el-option
-              v-for="ds in filteredTrainingDatasets"
-              :key="ds.upload_id"
-              :label="formatDatasetOption(ds)"
-              :value="ds.dataset_id"
-            />
-          </el-select>
+          <div class="dataset-select-row">
+            <el-select
+              v-model="trainForm.dataset_id"
+              filterable
+              clearable
+              :filter-method="filterTrainingDatasets"
+              no-data-text="暂无已上传数据集"
+              no-match-text="没有匹配的数据集"
+              placeholder="输入名称筛选已上传数据集"
+              @visible-change="onDatasetSelectVisibleChange"
+            >
+              <el-option
+                v-for="ds in filteredTrainingDatasets"
+                :key="ds.upload_id"
+                :label="formatDatasetOption(ds)"
+                :value="ds.dataset_id"
+              />
+            </el-select>
+            <el-button @click="openDatasetUploadPage">
+              <el-icon><Upload /></el-icon>上传
+            </el-button>
+          </div>
           <div
             v-if="selectedDataset"
             style="margin-top: 6px; font-size: 12px; color: #909399"
@@ -332,7 +272,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="基础模型">
-          <el-select v-model="trainForm.model_name">
+          <el-select
+            v-model="trainForm.model_name"
+            filterable
+            placeholder="搜索基础模型"
+            style="width: 100%"
+          >
             <el-option label="YOLO11n (Nano · 最快)" value="yolo11n" />
             <el-option label="YOLO11s (Small · 轻量)" value="yolo11s" />
             <el-option label="YOLO11m (Medium · 均衡)" value="yolo11m" />
@@ -390,65 +335,6 @@
         <el-button type="primary" @click="createTask" :loading="creating"
           >启动训练</el-button
         >
-      </template>
-    </el-dialog>
-
-    <!-- 上传数据集对话框 -->
-    <el-dialog v-model="showUploadDataset" title="上传训练数据集" width="550px">
-      <el-form label-width="100px">
-        <el-form-item label="数据集名称">
-          <el-input
-            v-model="uploadDatasetName"
-            placeholder="英文名，如 chest_xray_v2"
-          />
-        </el-form-item>
-        <el-form-item label="数据说明">
-          <div style="font-size: 12px; color: #909399; line-height: 1.6">
-            ZIP 包目录结构：<br />
-            ├─ images/train/ &nbsp; 训练图片 (.jpg/.png)<br />
-            ├─ images/val/ &nbsp;&nbsp;&nbsp; 验证图片 <br />
-            ├─ labels/train/ &nbsp; YOLO 标注 (.txt)<br />
-            └─ labels/val/ &nbsp;&nbsp;&nbsp; 验证标注
-          </div>
-        </el-form-item>
-        <el-form-item label="选择文件">
-          <el-upload
-            :auto-upload="false"
-            :limit="1"
-            accept=".zip"
-            :on-change="onUploadFileChange"
-            :file-list="uploadFileList"
-            :on-remove="onUploadFileRemove"
-          >
-            <el-button type="primary">选择 ZIP 文件</el-button>
-          </el-upload>
-        </el-form-item>
-      </el-form>
-      <div v-if="uploadProgress.visible" class="upload-progress">
-        <div class="upload-progress-title">
-          <span>分片 {{ uploadProgress.uploadedParts }}/{{ uploadProgress.totalParts }}</span>
-          <span>{{ uploadProgress.phaseText }}</span>
-        </div>
-        <el-progress
-          :percentage="Math.round(uploadProgress.percent)"
-          :status="uploadProgress.percent >= 100 ? 'success' : undefined"
-        />
-        <div class="upload-progress-meta">
-          <span>
-            {{ formatBytes(uploadProgress.uploadedBytes) }} /
-            {{ formatBytes(uploadProgress.totalBytes) }}
-          </span>
-          <span>速度 {{ formatSpeed(uploadProgress.speedBytesPerSecond) }}</span>
-          <span>预计剩余 {{ formatDuration(uploadProgress.remainingSeconds) }}</span>
-        </div>
-      </div>
-      <template #footer>
-        <el-button :disabled="uploading" @click="showUploadDataset = false">
-          取消
-        </el-button>
-        <el-button type="primary" @click="doUploadDataset" :loading="uploading">
-          分片上传到 OSS
-        </el-button>
       </template>
     </el-dialog>
 
@@ -532,13 +418,15 @@
 </template>
 
 <script setup>
-import { uploadDataset } from "@/api/dataset";
 import request from "@/utils/request";
-import { Download, Plus, Refresh } from "@element-plus/icons-vue";
+import { Download, Plus, Refresh, Upload } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
+const route = useRoute();
+const router = useRouter();
 const taskList = ref([]);
 const loadingTasks = ref(false);
 const selectedTask = ref(null);
@@ -568,17 +456,6 @@ const TERMINAL_TRAINING_STATUSES = [
 // 数据集管理
 const datasetList = ref([]);
 const datasetNameFilter = ref("");
-const showUploadDataset = ref(false);
-const uploadFile = ref(null);
-const uploadFileList = ref([]);
-const uploadDatasetName = ref("");
-const uploading = ref(false);
-const uploadProgress = ref(createUploadProgress());
-
-// 模型版本管理
-const modelVersions = ref([]);
-const loadingVersions = ref(false);
-const settingDefault = ref(null);
 
 const selectedDataset = computed(() => {
   return datasetList.value.find((d) => d.dataset_id === trainForm.value.dataset_id);
@@ -1101,80 +978,23 @@ function onDatasetSelectVisibleChange(visible) {
   }
 }
 
-async function doUploadDataset() {
-  if (!uploadFile.value || !uploadDatasetName.value.trim()) {
-    ElMessage.warning("请填写数据集名称并选择 ZIP 文件");
-    return;
+function openDatasetUploadPage() {
+  const { href } = router.resolve({
+    path: "/datasets",
+    query: { openUpload: "1" },
+  });
+  window.open(href, "_blank", "noopener");
+}
+
+async function selectTaskFromQuery() {
+  const taskUuid = String(route.query.task_uuid || "").trim();
+  if (!taskUuid) return;
+  const task = taskList.value.find(
+    (item) => item.task_uuid === taskUuid || String(item.id) === taskUuid,
+  );
+  if (task) {
+    await selectTask(task);
   }
-  uploading.value = true;
-  uploadProgress.value = createUploadProgress(true);
-  try {
-    const datasetName = uploadDatasetName.value.trim();
-    const result = await uploadDataset({
-      datasetName,
-      file: uploadFile.value,
-      onProgress: updateUploadProgress,
-    });
-    ElMessage.success("数据集已上传到 OSS，等待服务端确认");
-    showUploadDataset.value = false;
-    uploadFile.value = null;
-    uploadFileList.value = [];
-    uploadDatasetName.value = "";
-    await fetchDatasets();
-    const uploaded = result.upload;
-    if (uploaded?.dataset_id && isDatasetTrainable(uploaded)) {
-      trainForm.value.dataset_id = uploaded.dataset_id;
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "上传失败");
-  } finally {
-    uploading.value = false;
-  }
-}
-
-function onUploadFileChange(file) {
-  uploadFile.value = file.raw;
-  uploadFileList.value = [file];
-  if (!uploadDatasetName.value && file.name) {
-    uploadDatasetName.value = file.name.replace(/\.zip$/i, "");
-  }
-}
-
-function onUploadFileRemove() {
-  uploadFile.value = null;
-  uploadFileList.value = [];
-  uploadProgress.value = createUploadProgress();
-}
-
-function createUploadProgress(visible = false) {
-  return {
-    visible,
-    phase: "idle",
-    phaseText: "等待上传",
-    uploadedParts: 0,
-    totalParts: 0,
-    uploadedBytes: 0,
-    totalBytes: uploadFile.value?.size || 0,
-    percent: 0,
-    speedBytesPerSecond: 0,
-    remainingSeconds: null,
-  };
-}
-
-function updateUploadProgress(progress) {
-  const phaseTextMap = {
-    signing: "签发分片 URL",
-    uploading: progress.currentPartNumber
-      ? `上传第 ${progress.currentPartNumber} 片`
-      : "上传中",
-    finalizing: "合并分片",
-    completed: "上传完成",
-  };
-  uploadProgress.value = {
-    visible: true,
-    ...progress,
-    phaseText: phaseTextMap[progress.phase] || "上传中",
-  };
 }
 
 function formatDatasetOption(dataset) {
@@ -1199,20 +1019,6 @@ function formatDatasetUploadTime(dataset) {
   );
 }
 
-function datasetStatusText(status) {
-  const map = {
-    INITIATED: "已创建",
-    UPLOADING: "上传中",
-    CLIENT_COMPLETED: "等待确认",
-    UPLOADED: "已上传",
-    READY: "可训练",
-    FAILED: "失败",
-    EXPIRED: "已过期",
-    CANCELLED: "已删除",
-  };
-  return map[status] || status || "-";
-}
-
 function formatBytes(value) {
   const size = Number(value || 0);
   if (!size) return "0 MB";
@@ -1225,20 +1031,6 @@ function formatBytes(value) {
 function formatDate(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
-}
-
-function formatSpeed(value) {
-  if (!value) return "-";
-  return `${formatBytes(value)}/s`;
-}
-
-function formatDuration(value) {
-  if (value == null || !Number.isFinite(value)) return "-";
-  const seconds = Math.max(Math.ceil(value), 0);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return `${minutes}m ${rest}s`;
 }
 
 function formatRefreshAge(lastAt, now) {
@@ -1296,7 +1088,7 @@ async function exportModel() {
   try {
     const taskId = selectedTask.value.id || selectedTask.value.task?.id;
     const res = await request.post(`/training/export/${taskId}`, {
-      set_default: true,
+      set_default: false,
     });
     ElMessage.success(`模型已导出: ${res.version}`);
   } catch (e) {
@@ -1361,40 +1153,23 @@ async function doPredict() {
   }
 }
 
-onMounted(() => {
-  fetchTasks();
-  fetchDatasets();
-  fetchModelVersions();
+onMounted(async () => {
+  await Promise.all([fetchTasks(), fetchDatasets()]);
+  await selectTaskFromQuery();
   refreshClockTimer = setInterval(() => {
     refreshClockNow.value = Date.now();
   }, 1000);
 });
 
-// ── 模型版本管理 ──
-async function fetchModelVersions() {
-  loadingVersions.value = true;
-  try {
-    const res = await request.get("/training/models");
-    modelVersions.value = res.models || [];
-  } catch {
-    /* ignore */
-  } finally {
-    loadingVersions.value = false;
-  }
-}
-
-async function setDefaultModel(modelVersionId) {
-  settingDefault.value = modelVersionId;
-  try {
-    await request.post(`/training/models/${modelVersionId}/set-default`);
-    ElMessage.success("全局默认模型已切换，检测接口将使用新模型");
-    await fetchModelVersions();
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "设置失败");
-  } finally {
-    settingDefault.value = null;
-  }
-}
+watch(
+  () => route.query.task_uuid,
+  async () => {
+    if (!taskList.value.length) {
+      await fetchTasks();
+    }
+    await selectTaskFromQuery();
+  },
+);
 
 onBeforeUnmount(() => {
   stopPolling();
@@ -1441,28 +1216,12 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: #909399;
 }
-.upload-progress {
-  border-top: 1px solid #ebeef5;
-  margin-top: 8px;
-  padding-top: 14px;
-}
-.upload-progress-title,
-.upload-progress-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-.upload-progress-title {
-  color: #303133;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.upload-progress-meta {
-  color: #606266;
-  flex-wrap: wrap;
-  font-size: 12px;
-  margin-top: 8px;
+.dataset-select-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
 }
 .metric-cards {
   margin-bottom: 8px;

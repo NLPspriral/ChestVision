@@ -67,6 +67,7 @@ class User(Base):
     )
     detection_tasks = relationship("DetectionTask", back_populates="user")
     training_tasks = relationship("TrainingTask", back_populates="user")
+    model_uploads = relationship("ModelUpload", back_populates="user")
     chat_sessions = relationship("ChatSession", back_populates="user")
     operation_logs = relationship("OperationLog", back_populates="user")
     # v3.0 新增
@@ -213,6 +214,7 @@ class DetectionScene(Base):
     # 关联
     detection_tasks = relationship("DetectionTask", back_populates="scene")
     model_versions = relationship("ModelVersion", back_populates="scene")
+    model_uploads = relationship("ModelUpload", back_populates="scene")
     training_tasks = relationship("TrainingTask", back_populates="scene")
 
 
@@ -486,7 +488,7 @@ class DatasetUpload(Base):
         nullable=False,
         default="INITIATED",
         index=True,
-        comment="INITIATED/UPLOADING/CLIENT_COMPLETED/UPLOADED/FAILED/EXPIRED/CANCELLED；READY 仅兼容旧测试接口",
+        comment="INITIATED/UPLOADING/UPLOADED/FAILED/EXPIRED/CANCELLED",
     )
 
     bucket = Column(String(128), nullable=False, comment="OSS bucket")
@@ -518,6 +520,70 @@ class DatasetUpload(Base):
     expires_at = Column(DateTime, nullable=False, comment="上传会话过期时间")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class ModelUpload(Base):
+    """模型上传会话。
+
+    上传未完成前只记录会话和 OSS multipart 元数据；OSS 合并并校验通过后，
+    再创建 model_versions 主记录，避免半上传模型进入“所有模型”列表。
+    """
+
+    __tablename__ = "model_uploads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    upload_uuid = Column(
+        String(100), unique=True, nullable=False, index=True, comment="上传会话 ID"
+    )
+    user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True, comment="上传用户"
+    )
+    scene_id = Column(
+        Integer,
+        ForeignKey("detection_scenes.id"),
+        nullable=False,
+        index=True,
+        comment="所属检测场景",
+    )
+    model_version_id = Column(
+        Integer,
+        ForeignKey("model_versions.id"),
+        nullable=True,
+        index=True,
+        comment="上传完成后生成的模型版本 ID",
+    )
+
+    model_name = Column(String(100), nullable=False, comment="模型名称")
+    version = Column(String(50), nullable=False, comment="模型版本")
+    model_type = Column(String(50), nullable=False, comment="YOLO 模型类型")
+    status = Column(
+        String(30),
+        nullable=False,
+        default="INITIATED",
+        index=True,
+        comment="INITIATED/UPLOADING/UPLOADED/FAILED/EXPIRED/CANCELLED",
+    )
+
+    bucket = Column(String(128), nullable=False, comment="OSS bucket")
+    object_key = Column(String(500), nullable=False, comment="模型权重对象 key")
+    original_filename = Column(String(255), nullable=False, comment="原始文件名")
+    content_type = Column(String(100), nullable=True, comment="上传对象 MIME 类型")
+    expected_size = Column(BigInteger, nullable=True, comment="客户端声明大小")
+    actual_size = Column(BigInteger, nullable=True, comment="OSS HeadObject 大小")
+    etag = Column(String(128), nullable=True, comment="OSS 对象 ETag")
+    checksum_sha256 = Column(String(128), nullable=True, comment="模型 SHA256")
+    object_metadata = Column("metadata", JSON, nullable=True, comment="上传元数据")
+
+    client_completed_at = Column(DateTime, nullable=True, comment="客户端完成合并时间")
+    server_verified_at = Column(DateTime, nullable=True, comment="服务端校验通过时间")
+    error_message = Column(Text, nullable=True, comment="失败原因")
+    expires_at = Column(DateTime, nullable=False, comment="上传会话过期时间")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="model_uploads")
+    scene = relationship("DetectionScene", back_populates="model_uploads")
+    model_version = relationship("ModelVersion", back_populates="upload_sessions")
 
 
 class RemoteTrainingJob(Base):
@@ -665,7 +731,7 @@ class ModelVersion(Base):
     )
 
     # 模型文件
-    model_path = Column(String(500), nullable=False, comment="本地模型文件路径")
+    model_path = Column(String(500), nullable=True, comment="本地模型文件路径或 OSS URI")
     minio_url = Column(String(500), nullable=True, comment="MinIO 存储 URL")
 
     # 评估指标（训练完成后写入）
@@ -692,6 +758,7 @@ class ModelVersion(Base):
         back_populates="model_version",
         cascade="all, delete-orphan",
     )
+    upload_sessions = relationship("ModelUpload", back_populates="model_version")
     detection_tasks = relationship("DetectionTask", back_populates="model_version")
 
 

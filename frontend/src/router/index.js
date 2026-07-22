@@ -51,6 +51,12 @@ const routes = [
         meta: { title: "数据集管理", icon: "FolderOpened" },
       },
       {
+        path: "models",
+        name: "Models",
+        component: () => import("@/views/ModelPage.vue"),
+        meta: { title: "模型管理", icon: "Box" },
+      },
+      {
         path: "history",
         name: "History",
         component: () => import("@/views/HistoryPage.vue"),

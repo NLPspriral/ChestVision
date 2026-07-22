@@ -15,6 +15,7 @@ from app.config.settings import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logger import get_logger
 from app.middleware.request_logger import RequestLogMiddleware
+from app.model_management.router import router as model_management_router
 from app.train.remote_train_config import check_remote_train_environment
 from app.train.remote_train_router import router as remote_training_router
 from fastapi import FastAPI
@@ -107,6 +108,7 @@ app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(training_router)  # 注册训练 API 路由
 app.include_router(remote_training_router)  # 注册生产远程训练 API 路由
+app.include_router(model_management_router)  # 注册模型管理 API 路由
 app.include_router(detection_router)  # 注册检测 API 路由
 app.include_router(chat_router)  # 注册对话 API 路由
 app.include_router(patient_router)  # 注册患者管理 API 路由

@@ -137,6 +137,10 @@ class OssStorageGateway:
             slash_safe=True,
         )
 
+    def sign_get_url(self, key: str, expires_seconds: int) -> str:
+        """生成短期 GET 预签名 URL，用于浏览器直接下载 OSS 大文件。"""
+        return self.bucket.sign_url("GET", key, expires_seconds, slash_safe=True)
+
     def complete_multipart_upload(
         self,
         key: str,
@@ -185,6 +189,22 @@ class OssStorageGateway:
     def delete_object(self, key: str) -> None:
         """Delete one OSS object by key."""
         self.bucket.delete_object(key)
+
+    def delete_prefix(self, prefix: str) -> list[str]:
+        """Delete all OSS objects under a prefix and return deleted keys."""
+        normalized = (prefix or "").strip("/")
+        if not normalized:
+            raise ValueError("OSS prefix 不能为空")
+        normalized += "/"
+        deleted: list[str] = []
+        for obj in self.oss2.ObjectIterator(self.bucket, prefix=normalized):
+            self.bucket.delete_object(obj.key)
+            deleted.append(obj.key)
+        return deleted
+
+    def download_to_file(self, key: str, local_path: str) -> None:
+        """Download one OSS object to a local file path."""
+        self.bucket.get_object_to_file(key, local_path)
 
     def get_text(self, key: str) -> str:
         result = self.bucket.get_object(key)

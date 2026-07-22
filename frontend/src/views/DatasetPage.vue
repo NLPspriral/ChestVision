@@ -112,12 +112,29 @@
             :auto-upload="false"
             :limit="1"
             :file-list="fileList"
+            :show-file-list="false"
             :on-change="onFileChange"
             :on-remove="onFileRemove"
             :disabled="uploading"
           >
-            <el-icon class="upload-icon"><UploadFilled /></el-icon>
-            <div class="el-upload__text">拖入或选择 ZIP 文件</div>
+            <div v-if="selectedFile" class="selected-upload-file">
+              <el-icon><Document /></el-icon>
+              <span class="selected-file-name" :title="selectedFile.name">
+                {{ selectedFile.name }}
+              </span>
+              <el-button
+                v-if="!uploading"
+                text
+                type="danger"
+                @click.stop="onFileRemove"
+              >
+                移除
+              </el-button>
+            </div>
+            <template v-else>
+              <el-icon class="upload-icon"><UploadFilled /></el-icon>
+              <div class="el-upload__text">拖入或选择 ZIP 文件</div>
+            </template>
           </el-upload>
         </el-form-item>
       </el-form>
@@ -183,6 +200,7 @@ import {
 import {
   CircleClose,
   Delete,
+  Document,
   FolderOpened,
   Refresh,
   Search,
@@ -192,8 +210,10 @@ import {
   VideoPlay,
 } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
+const route = useRoute();
 const datasetList = ref([]);
 const keyword = ref("");
 const loading = ref(false);
@@ -219,8 +239,7 @@ const filteredDatasets = computed(() => {
 });
 
 const readyDatasets = computed(() =>
-  datasetList.value.filter((item) => ["UPLOADED", "READY"].includes(item.status))
-    .length,
+  datasetList.value.filter((item) => item.status === "UPLOADED").length,
 );
 
 const canStartUpload = computed(
@@ -272,6 +291,12 @@ function openUploadDialog() {
 }
 
 function onFileChange(file) {
+  if (!String(file.name || "").toLowerCase().endsWith(".zip")) {
+    ElMessage.warning("数据集文件必须是 .zip");
+    selectedFile.value = null;
+    fileList.value = [];
+    return false;
+  }
   selectedFile.value = file.raw;
   fileList.value = [file];
   if (!uploadForm.value.datasetName && file.name) {
@@ -444,9 +469,7 @@ function statusText(status) {
   const map = {
     INITIATED: "已创建",
     UPLOADING: "上传中",
-    CLIENT_COMPLETED: "等待确认",
     UPLOADED: "已上传",
-    READY: "可训练",
     FAILED: "失败",
     EXPIRED: "已过期",
     CANCELLED: "已删除",
@@ -455,9 +478,8 @@ function statusText(status) {
 }
 
 function statusType(status) {
-  if (["UPLOADED", "READY"].includes(status)) return "success";
+  if (status === "UPLOADED") return "success";
   if (["FAILED", "EXPIRED", "CANCELLED"].includes(status)) return "danger";
-  if (status === "CLIENT_COMPLETED") return "warning";
   return "info";
 }
 
@@ -489,7 +511,21 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
-onMounted(fetchDatasets);
+function openUploadDialogFromQuery() {
+  if (route.query.openUpload === "1") {
+    openUploadDialog();
+  }
+}
+
+watch(
+  () => route.query.openUpload,
+  () => openUploadDialogFromQuery(),
+);
+
+onMounted(() => {
+  fetchDatasets();
+  openUploadDialogFromQuery();
+});
 </script>
 
 <style lang="scss" scoped>
@@ -559,6 +595,27 @@ onMounted(fetchDatasets);
   color: #909399;
   font-size: 32px;
   margin-bottom: 8px;
+}
+
+.selected-upload-file {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 92px;
+  padding: 0 18px;
+  width: 100%;
+}
+
+.selected-file-name {
+  color: #303133;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .upload-progress {
