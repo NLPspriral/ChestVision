@@ -45,6 +45,7 @@ LangGraph 多 Agent 工作流 — 胸片X光智能分析系统
   result = await graph.ainvoke(initial_state)
 """
 
+import asyncio
 from typing import AsyncGenerator, Literal, Optional
 
 from langgraph.graph import END, StateGraph
@@ -248,6 +249,7 @@ async def run_graph_stream(
                     "type": "text_chunk",
                     "content": final_response[i:i + chunk_size],
                 }
+                await asyncio.sleep(0.018)
         else:
             # 检查是否有其他产出（qa_result, report_result 等）
             alt_response = (
@@ -260,6 +262,7 @@ async def run_graph_stream(
                 chunk_size = 15
                 for i in range(0, len(alt_response), chunk_size):
                     yield {"type": "text_chunk", "content": alt_response[i:i + chunk_size]}
+                    await asyncio.sleep(0.018)
             else:
                 yield {
                     "type": "text_chunk",

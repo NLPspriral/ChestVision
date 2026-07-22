@@ -13,6 +13,7 @@
                                 → Summarize 汇总 → SSE 流式返回
 """
 
+import asyncio
 import json
 import os
 import re
@@ -780,8 +781,18 @@ async def multi_agent_chat(
                         knowledge_sources = node_output.get("knowledge_sources", [])
                         has_knowledge = node_output.get("has_knowledge", False)
 
-                        # 发送 text_chunk
-                        yield f"data: {json.dumps({'type': 'text_chunk', 'content': final_text, 'knowledge_sources': knowledge_sources, 'has_knowledge': has_knowledge}, ensure_ascii=False)}\n\n"
+                        # 只将 Supervisor 的最终回答流式显示到屏幕。
+                        chunk_size = 14
+                        for index in range(0, len(final_text), chunk_size):
+                            chunk_event = {
+                                "type": "text_chunk",
+                                "content": final_text[index : index + chunk_size],
+                            }
+                            if index == 0:
+                                chunk_event["knowledge_sources"] = knowledge_sources
+                                chunk_event["has_knowledge"] = has_knowledge
+                            yield f"data: {json.dumps(chunk_event, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.018)
                         full_response = final_text
 
             # ── 保存 AI 回复 ──
