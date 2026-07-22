@@ -2,7 +2,7 @@
   <aside class="app-sidebar" :class="{ collapsed }">
     <!-- Logo 区域 -->
     <div class="sidebar-logo" @click="$router.push('/')">
-      <img src="@/assets/xjtulogo.png" alt="logo" class="sidebar-logo-img" />
+      <img src="@/assets/xjtulogob.png" alt="logo" class="sidebar-logo-img" />
       <Transition name="fade">
         <div v-show="!collapsed" class="logo-info">
           <span class="logo-text">ChestVision</span>
@@ -138,21 +138,13 @@ const menuItems = computed(() =>
 // ── Logo 区域 ──────────────────────────────────────
 .sidebar-logo {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 6px;
-  padding: 12px 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
   cursor: pointer;
-  background: linear-gradient(145deg, #f9fbfd 0%, #eaf2f7 100%);
-  border-bottom: 1px solid rgba(23, 50, 77, 0.14);
-  min-height: 108px;
-  box-sizing: border-box;
-  transition: background 0.2s ease;
-
-  &:hover {
-    background: linear-gradient(145deg, #ffffff 0%, #e3eef4 100%);
-  }
+  background: $sidebar-logo-bg;
+  border-bottom: 1px solid $sidebar-divider;
+  min-height: 60px;
 
   .logo-icon {
     font-size: 28px;
@@ -161,46 +153,31 @@ const menuItems = computed(() =>
   }
 
   .sidebar-logo-img {
-    width: 132px;
-    height: auto;
+    height: 36px;
+    width: auto;
     flex-shrink: 0;
-    filter: saturate(1.08) contrast(1.06);
   }
 
   .logo-info {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 2px;
     overflow: hidden;
-    width: 100%;
   }
 
   .logo-text {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
-    color: #17324d;
+    color: #e8eaf0;
     letter-spacing: 0.5px;
-    line-height: 1.25;
     white-space: nowrap;
   }
 
   .logo-subtitle {
     font-size: 11px;
-    color: #60758a;
+    color: $sidebar-text;
     white-space: nowrap;
     letter-spacing: 0.3px;
-  }
-}
-
-.app-sidebar.collapsed .sidebar-logo {
-  align-items: center;
-  padding: 12px 10px;
-
-  .sidebar-logo-img {
-    width: 36px;
-    height: 36px;
-    object-fit: cover;
-    object-position: left center;
   }
 }
 

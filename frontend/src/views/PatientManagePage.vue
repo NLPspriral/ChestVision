@@ -1,6 +1,11 @@
 ﻿<template>
   <div class="page-container">
-    <h2>👥 患者管理</h2>
+    <div class="page-header">
+      <div>
+        <h2>患者管理</h2>
+        <span class="page-subtitle">Patients</span>
+      </div>
+    </div>
 
     <el-card v-if="isAdmin" shadow="never" class="review-card">
       <template #header>
@@ -9,8 +14,13 @@
             <b>AI 医生推荐待确认</b>
             <span>患者选择推荐医生后，会在这里等待管理员审核</span>
           </div>
-          <el-badge :value="pendingReviews.length" :hidden="!pendingReviews.length">
-            <el-button size="small" @click="fetchPendingReviews">刷新</el-button>
+          <el-badge
+            :value="pendingReviews.length"
+            :hidden="!pendingReviews.length"
+          >
+            <el-button size="small" @click="fetchPendingReviews"
+              >刷新</el-button
+            >
           </el-badge>
         </div>
       </template>
@@ -38,7 +48,8 @@
               size="small"
               effect="plain"
               class="lesion-tag"
-            >{{ lesionName(lesion) }}</el-tag>
+              >{{ lesionName(lesion) }}</el-tag
+            >
           </template>
         </el-table-column>
         <el-table-column label="申请医生" min-width="160">
@@ -56,10 +67,19 @@
         </el-table-column>
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="success" @click="handleReview(row, true)">
+            <el-button
+              size="small"
+              type="success"
+              @click="handleReview(row, true)"
+            >
               确认
             </el-button>
-            <el-button size="small" type="danger" plain @click="handleReview(row, false)">
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              @click="handleReview(row, false)"
+            >
               驳回
             </el-button>
           </template>
@@ -165,16 +185,16 @@
 
 <script setup>
 import {
+  confirmDoctorRecommendation,
+  getPendingDoctorReviews,
+  rejectDoctorRecommendation,
+} from "@/api/doctorRecommendation";
+import {
   assignPatient,
   getDoctors,
   getPatients,
   removeRelation,
 } from "@/api/patient";
-import {
-  confirmDoctorRecommendation,
-  getPendingDoctorReviews,
-  rejectDoctorRecommendation,
-} from "@/api/doctorRecommendation";
 import { useUserStore } from "@/stores/user";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
@@ -319,6 +339,7 @@ onMounted(() => {
 }
 .review-card {
   margin-bottom: 16px;
+  border-radius: $border-radius-lg;
 }
 .review-header {
   display: flex;
@@ -342,11 +363,7 @@ onMounted(() => {
 }
 .text-secondary {
   color: #909399;
-}
-h2 {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 $spacing-lg;
-  color: $text-primary;
+  text-align: center;
+  padding: 40px;
 }
 </style>
