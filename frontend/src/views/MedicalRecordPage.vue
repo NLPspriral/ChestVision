@@ -152,6 +152,7 @@
               <el-date-picker
                 v-model="form.visit_date"
                 type="date"
+                value-format="YYYY-MM-DD"
                 style="width: 100%"
                 placeholder="选择日期"
               />
