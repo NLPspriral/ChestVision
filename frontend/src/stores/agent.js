@@ -116,8 +116,8 @@ export const useAgentStore = defineStore("agent", {
       try {
         const res = await getSessionsApi({ status: "all", limit: 50 });
         this.sessions = res.sessions || [];
-      } catch (e) {
-        console.error("加载会话列表失败:", e);
+      } catch {
+        /* 页面层通过 sessionsLoading=false + 空列表自行处理 */
       } finally {
         this.sessionsLoading = false;
       }
@@ -137,7 +137,6 @@ export const useAgentStore = defineStore("agent", {
         this.currentSessionId = sessionId;
         sessionStorage.setItem(SESSION_STORAGE_KEY, String(sessionId));
       } catch (e) {
-        console.error("加载消息失败:", e);
         throw e;
       }
     },
@@ -157,8 +156,7 @@ export const useAgentStore = defineStore("agent", {
           this.newChat();
         }
         return true;
-      } catch (e) {
-        console.error("删除会话失败:", e);
+      } catch {
         return false;
       }
     },

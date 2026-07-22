@@ -1,6 +1,11 @@
 <template>
   <div class="detection-page">
-    <h2>🧠 胸片病灶检测</h2>
+    <div class="page-header">
+      <div>
+        <h2>检测工作台</h2>
+        <span class="page-subtitle">Detection</span>
+      </div>
+    </div>
 
     <div class="detection-layout">
       <!-- 左侧：上传区 -->
@@ -63,7 +68,10 @@
               </el-select>
             </div>
             <div
-              v-if="userStore.userType === 'doctor' || userStore.userType === 'admin'"
+              v-if="
+                userStore.userType === 'doctor' ||
+                userStore.userType === 'admin'
+              "
               class="param-item"
             >
               <span>关联患者（用于病史分析与医生匹配）</span>
@@ -374,7 +382,7 @@ async function fetchModels() {
       selectedModelId.value = defaultModel.id;
     }
   } catch {
-    /* 模型列表加载失败不影响检测 */
+    ElMessage.warning("模型列表加载失败，将使用默认模型");
   }
 }
 
@@ -385,6 +393,7 @@ async function fetchPatients() {
     patientList.value = result.items || [];
   } catch {
     patientList.value = [];
+    ElMessage.warning("患者列表加载失败");
   }
 }
 
@@ -434,7 +443,6 @@ async function startDetect() {
       ElMessage.success("检测完成，未发现明显病灶");
     }
   } catch (err) {
-    console.error("检测失败:", err);
     ElMessage.error(err.response?.data?.detail || "检测请求失败");
   } finally {
     detecting.value = false;
@@ -452,13 +460,12 @@ async function loadAnnotatedImage(url) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      console.warn("标注图加载失败:", response.status);
       return;
     }
     const blob = await response.blob();
     annotatedImageUrl.value = URL.createObjectURL(blob);
-  } catch (e) {
-    console.warn("标注图加载异常:", e);
+  } catch {
+    /* 标注图非关键，静默失败 */
   }
 }
 

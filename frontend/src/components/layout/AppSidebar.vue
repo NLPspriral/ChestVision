@@ -2,7 +2,7 @@
   <aside class="app-sidebar" :class="{ collapsed }">
     <!-- Logo 区域 -->
     <div class="sidebar-logo" @click="$router.push('/')">
-      <img src="@/assets/xjtulogo.png" alt="logo" class="sidebar-logo-img" />
+      <img src="@/assets/xjtulogob.png" alt="logo" class="sidebar-logo-img" />
       <Transition name="fade">
         <div v-show="!collapsed" class="logo-info">
           <span class="logo-text">ChestVision</span>

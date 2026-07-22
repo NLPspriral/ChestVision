@@ -65,6 +65,7 @@
 <script setup>
 import request from "@/utils/request";
 import * as echarts from "echarts";
+import { ElMessage } from "element-plus";
 import { nextTick, onMounted, ref } from "vue";
 
 const stats = ref({});
@@ -77,7 +78,7 @@ onMounted(async () => {
     await nextTick();
     renderCharts();
   } catch {
-    /* ignore */
+    ElMessage.error("数据看板加载失败，请稍后重试");
   }
 });
 
