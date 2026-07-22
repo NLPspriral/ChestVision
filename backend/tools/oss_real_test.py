@@ -2,7 +2,7 @@
 """
 真实阿里云 OSS SDK 测试程序。
 
-先填写下方全局变量，再把 CONFIRM_REAL_CLOUD_CALLS 改为 True，然后运行：
+先在 backend/.env 填写 OSS_* 或 ALIBABA_CLOUD_* 环境变量，再运行：
 
   python backend/tools/oss_real_test.py --case config-check
   # 含义：只检查全局变量是否填写完整；不会访问 OSS，也不会产生对象或费用。
@@ -47,8 +47,43 @@ import urllib.request
 import uuid
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
+
+
+def load_backend_env() -> None:
+    """Load backend/.env so the test script can use local runtime settings."""
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+        return
+    except Exception:
+        pass
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+load_backend_env()
 
 # ══════════════════════════════════════════════════════════════
 # 运行真实云测试前，请填写这些全局变量
@@ -58,7 +93,7 @@ from urllib.error import HTTPError
 # 获取方式：不需要从控制台获取，这是脚本自己的保护开关。
 # 使用方式：所有变量都填好，并且确认要访问真实 OSS 后，才改为 True。
 # 保持 False 时，除了 config-check 外的真实 OSS 操作都会被拦截。
-CONFIRM_REAL_CLOUD_CALLS = False
+CONFIRM_REAL_CLOUD_CALLS = env_bool("CONFIRM_REAL_CLOUD_CALLS", False)
 
 # 后端用于签发预签名 URL 的 OSS AccessKey ID。
 # 这个 AccessKey 只应该存在于后端环境中，绝不能返回给浏览器。
@@ -74,14 +109,14 @@ CONFIRM_REAL_CLOUD_CALLS = False
 #   3. 如果使用 STS，则填写 AssumeRole 返回的临时 AccessKeyId，通常以 "STS." 开头。
 #   4. 也可以不写在文件里，改用环境变量 OSS_ACCESS_KEY_ID 或 ALIBABA_CLOUD_ACCESS_KEY_ID。
 # 注意：不要使用主账号 AccessKey，不要把真实密钥提交到代码仓库。
-OSS_ACCESS_KEY_ID = ""
+OSS_ACCESS_KEY_ID = os.getenv("OSS_ACCESS_KEY_ID", "")
 
 # 与 OSS_ACCESS_KEY_ID 配套的 AccessKey Secret。
 # 获取方式：
 #   创建 AccessKey 时只显示一次；如果忘记，只能重新创建新的 AccessKey，
 #   并禁用或删除旧 AccessKey。
 # 环境变量兜底：OSS_ACCESS_KEY_SECRET 或 ALIBABA_CLOUD_ACCESS_KEY_SECRET。
-OSS_ACCESS_KEY_SECRET = ""
+OSS_ACCESS_KEY_SECRET = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
 # 后端凭证使用 STS 时的 SecurityToken，可选。
 # 获取方式：
@@ -93,7 +128,7 @@ OSS_ACCESS_KEY_SECRET = ""
 #   这个 token 也只属于后端凭证，不会返回给浏览器。
 #   浏览器只拿预签名 URL。
 # 环境变量兜底：OSS_SECURITY_TOKEN、OSS_SESSION_TOKEN 或 ALIBABA_CLOUD_SECURITY_TOKEN。
-OSS_SECURITY_TOKEN = ""
+OSS_SECURITY_TOKEN = os.getenv("OSS_SECURITY_TOKEN", "")
 
 # OSS Endpoint。
 # 获取方式：
@@ -105,7 +140,7 @@ OSS_SECURITY_TOKEN = ""
 #   - 脚本运行在阿里云同地域内网环境时，才使用 internal/VPC endpoint。
 #   - 如果你的账号或 bucket 要求绑定自定义域名进行数据操作，就填自定义域名 endpoint。
 #   - Endpoint 是访问入口；真正操作的对象仍然受 OSS_BUCKET 限定。
-OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
+OSS_ENDPOINT = os.getenv("OSS_ENDPOINT", "https://oss-cn-shanghai.aliyuncs.com")
 
 # Bucket 所在地域 ID。
 # 获取方式：
@@ -114,7 +149,7 @@ OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
 # 示例：
 #   cn-hangzhou、cn-shanghai、ap-southeast-1。
 # OSS V4 签名需要这个字段。
-OSS_REGION = "cn-shanghai"
+OSS_REGION = os.getenv("OSS_REGION", os.getenv("PAI_REGION_ID", "cn-shanghai"))
 
 # 已存在的 OSS Bucket 名称。
 # 获取方式：
@@ -124,7 +159,7 @@ OSS_REGION = "cn-shanghai"
 #   - 脚本不会删除 bucket。
 #   - 脚本所有 put/head/get/list/delete 操作都发生在这个 bucket 内部。
 #   - 后续 object key 都是 bucket 内部路径，而不是本地文件系统路径。
-OSS_BUCKET = ""
+OSS_BUCKET = os.getenv("OSS_BUCKET", "")
 
 # 测试对象在 bucket 内部使用的前缀。
 # 获取方式：不需要从控制台获取，你自己指定一个专门用于测试的前缀即可。
@@ -136,7 +171,10 @@ OSS_BUCKET = ""
 #       {OSS_TEST_PREFIX}/20260717120000-abcd1234/dataset.zip
 #   - 当 DELETE_OBJECTS_AFTER_TEST=True 时，脚本只删除本次生成的这些对象，
 #     不会清空整个前缀，更不会删除 bucket。
-OSS_TEST_PREFIX = "upload/remote-training-sdk-test"
+OSS_TEST_PREFIX = os.getenv(
+    "OSS_TEST_PREFIX",
+    os.getenv("REMOTE_TRAIN_OSS_PREFIX", "upload/remote-training-sdk-test"),
+)
 
 # 是否在每个测试用例结束后删除本次创建的 OSS 对象。
 # 是否测试删除操作：
@@ -355,7 +393,8 @@ def case_config_check() -> None:
     require_config(config, require_confirm=False)
     print("[PASS] config-check")
     printable = {
-        k: ("***" if "secret" in k or "token" in k else v) for k, v in config.items()
+        k: ("***" if "access_key" in k or "secret" in k or "token" in k else v)
+        for k, v in config.items()
     }
     printable["confirm_real_cloud_calls"] = CONFIRM_REAL_CLOUD_CALLS
     print(json.dumps(printable, indent=2, ensure_ascii=False))

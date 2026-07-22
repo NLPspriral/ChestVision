@@ -1,400 +1,37 @@
 """
-胸片检测智能体 — ReAct Agent + 检测工具绑定
+胸片检测智能体 — 多工具 Agent + 对话记忆 + 增强 SSE（Day 11 升级版）
 
-职责：
-  - 创建 LangChain ReAct Agent
-  - 绑定胸片检测工具（单图/批量/ZIP）
-  - 处理 SSE 流式输出 Agent 的思考过程和结果
+升级内容：
+  1. Prompt 模板外置到 prompts.py
+  2. 工具拆分到 tools/ 目录（检测 + 分析 + 知识库）
+  3. 集成对话记忆（Redis缓存 + DB持久化）
+  4. SSE 事件协议增强（thinking/tool_start/tool_end/text_chunk/done/error）
+
+架构：
+  用户消息 → 加载历史 → Agent（LLM + 7+ 工具）→ 调用工具 → SSE 流式返回
 """
 
-import json
 from typing import AsyncGenerator, Optional
 
-from app.config.settings import settings
-from app.core.logger import get_logger
+import httpx
+
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from app.agent.memory import conversation_memory
+from app.agent.prompts import CHESTX_AGENT_SYSTEM_PROMPT
+from app.agent.tools.analysis_tool import SYSTEM_TOOLS
+from app.agent.tools.detection_tool import (
+    DETECTION_TOOLS,
+    clear_last_result,
+    get_last_result,
+)
+from app.agent.tools.knowledge_tool import KNOWLEDGE_TOOLS
+from app.config.settings import settings
+from app.core.logger import get_logger
+
 logger = get_logger(__name__)
-
-
-# ══════════════════════════════════════════════════════════════
-# 一、定义胸片检测工具
-# ══════════════════════════════════════════════════════════════
-
-
-@tool
-def detect_single_image(image_path: str, conf: float = 0.25, iou: float = 0.45) -> str:
-    """
-    检测单张胸片图像中的病灶。支持10种胸部病变：肺不张、钙化、实变、积液、
-    肺气肿、纤维化、骨折、肿块、结节、气胸。
-
-    Args:
-        image_path: 胸片图像文件路径
-        conf: 置信度阈值，默认 0.25
-        iou: NMS IoU 阈值，默认 0.45
-
-    Returns:
-        JSON 字符串，包含检测到的病灶列表和统计信息
-    """
-    from app.services.detection_service import detection_service
-
-    if not os.path.exists(image_path):
-        return json.dumps(
-            {"error": f"图片文件不存在，请让用户重新上传胸片进行检测。"},
-            ensure_ascii=False,
-        )
-
-    result = detection_service.detect_single(image_path, conf=conf, iou=iou)
-    # 把完整结果存下来（含 base64），供前端卡片使用
-    DetectionAgent._last_result = result
-    # 返回给 LLM 的摘要（去掉大体积的 base64）
-    summary = {
-        "total_objects": result["total_objects"],
-        "class_counts": result["class_counts"],
-        "inference_time": result["inference_time"],
-    }
-    return json.dumps(summary, ensure_ascii=False)
-
-
-@tool
-def detect_batch_images(image_paths: list[str], conf: float = 0.25) -> str:
-    """
-    批量检测多张胸片图像中的病灶。
-
-    Args:
-        image_paths: 胸片图像文件路径列表
-        conf: 置信度阈值，默认 0.25
-
-    Returns:
-        JSON 字符串，包含每张胸片的检测结果汇总
-    """
-    from app.services.detection_service import detection_service
-
-    result = detection_service.detect_batch(image_paths, conf=conf)
-    DetectionAgent._last_result = result
-    summary = {
-        "total_images": result.get("total_images", 0),
-        "total_objects": result["total_objects"],
-        "class_counts": result["class_counts"],
-        "total_inference_time": result.get("total_inference_time", 0),
-    }
-    return json.dumps(summary, ensure_ascii=False)
-
-
-@tool
-def detect_zip_file(zip_path: str, conf: float = 0.25) -> str:
-    """
-    解压 ZIP 文件并批量检测其中所有胸片图像的病灶。
-
-    Args:
-        zip_path: ZIP 文件路径
-        conf: 置信度阈值，默认 0.25
-
-    Returns:
-        JSON 字符串，包含 ZIP 内所有胸片的检测结果汇总
-    """
-    from app.services.detection_service import detection_service
-
-    result = detection_service.detect_zip(zip_path, conf=conf)
-    DetectionAgent._last_result = result
-    summary = {
-        "total_images": result.get("total_images", 0),
-        "total_objects": result["total_objects"],
-        "class_counts": result["class_counts"],
-        "total_inference_time": result.get("total_inference_time", 0),
-    }
-    return json.dumps(summary, ensure_ascii=False)
-
-
-@tool
-def query_system_info(query_type: str) -> str:
-    """
-    查询系统信息，自动根据当前用户权限过滤。
-    - patients: 患者总数（适合问"有几个病人"）
-    - my_patients: 患者完整列表，含编号/姓名/年龄/性别（适合问"有哪些病人""病人列表"）
-    - doctors: 医生总数
-    - users: 用户分类统计（仅管理员）
-    - detections: 检测任务总数
-    - my_records: 我的病例列表（适合问"我的病例"）
-    - records: 病例总数
-    - recent: 最近7天检测统计
-    - lesions: 病灶分布统计
-
-    Args:
-        query_type: 查询类型
-    """
-    from app.database.session import SessionLocal
-    from app.entity.db_models import (
-        DetectionTask,
-        DoctorPatientRelation,
-        MedicalRecord,
-        PatientProfile,
-        User,
-    )
-
-    user = DetectionAgent._current_user
-    db = SessionLocal()
-    try:
-        if query_type == "patients":
-            if user and user.user_type == "admin":
-                count = db.query(PatientProfile).count()
-            elif user and user.user_type == "doctor":
-                count = (
-                    db.query(DoctorPatientRelation)
-                    .filter(
-                        DoctorPatientRelation.doctor_id == user.id,
-                        DoctorPatientRelation.relation_status == "active",
-                    )
-                    .count()
-                )
-            else:
-                count = 1 if user else 0
-            return json.dumps({"patients": count}, ensure_ascii=False)
-        elif query_type == "doctors":
-            count = db.query(User).filter(User.user_type == "doctor").count()
-            return json.dumps({"doctors": count}, ensure_ascii=False)
-        elif query_type == "users":
-            total = db.query(User).count()
-            patients = db.query(User).filter(User.user_type == "patient").count()
-            doctors = db.query(User).filter(User.user_type == "doctor").count()
-            admins = db.query(User).filter(User.user_type == "admin").count()
-            return json.dumps(
-                {
-                    "total_users": total,
-                    "patients": patients,
-                    "doctors": doctors,
-                    "admins": admins,
-                },
-                ensure_ascii=False,
-            )
-        elif query_type == "detections":
-            count = db.query(DetectionTask).count()
-            completed = (
-                db.query(DetectionTask)
-                .filter(DetectionTask.status == "completed")
-                .count()
-            )
-            return json.dumps(
-                {
-                    "total_detections": count,
-                    "completed": completed,
-                },
-                ensure_ascii=False,
-            )
-        elif query_type == "records":
-            count = db.query(MedicalRecord).count()
-            return json.dumps({"medical_records": count}, ensure_ascii=False)
-        elif query_type == "recent":
-            from datetime import datetime, timedelta
-
-            week_ago = datetime.now() - timedelta(days=7)
-            count = (
-                db.query(DetectionTask)
-                .filter(
-                    DetectionTask.created_at >= week_ago,
-                    DetectionTask.status == "completed",
-                )
-                .count()
-            )
-            total_lesions = (
-                db.query(DetectionTask)
-                .filter(
-                    DetectionTask.created_at >= week_ago,
-                    DetectionTask.status == "completed",
-                )
-                .all()
-            )
-            lesion_sum = sum(t.total_objects for t in total_lesions)
-            return json.dumps(
-                {
-                    "recent_7days_detections": count,
-                    "recent_7days_lesions": lesion_sum,
-                },
-                ensure_ascii=False,
-            )
-        elif query_type == "lesions":
-            tasks = (
-                db.query(DetectionTask)
-                .filter(DetectionTask.status == "completed")
-                .all()
-            )
-            from app.services.detection_service import CLASS_NAMES_CN
-
-            stats = {}
-            for t in tasks:
-                for r in t.results:
-                    cn = r.class_name_cn or r.class_name
-                    stats[cn] = stats.get(cn, 0) + 1
-            return json.dumps({"lesion_distribution": stats}, ensure_ascii=False)
-        elif query_type == "my_patients":
-            if not user or user.user_type not in ("doctor", "admin"):
-                return json.dumps(
-                    {"message": "仅医生/管理员可查看"}, ensure_ascii=False
-                )
-            if user.user_type == "admin":
-                profiles = db.query(PatientProfile).all()
-            else:
-                subq = (
-                    db.query(DoctorPatientRelation.patient_id)
-                    .filter(
-                        DoctorPatientRelation.doctor_id == user.id,
-                        DoctorPatientRelation.relation_status == "active",
-                    )
-                    .subquery()
-                )
-                profiles = (
-                    db.query(PatientProfile)
-                    .filter(PatientProfile.user_id.in_(db.query(subq.c.patient_id)))
-                    .all()
-                )
-            items = [
-                {
-                    "code": p.patient_code,
-                    "name": p.real_name or "-",
-                    "age": p.age,
-                    "gender": p.gender,
-                }
-                for p in profiles
-            ]
-            return json.dumps(
-                {"patients": items, "count": len(items)}, ensure_ascii=False
-            )
-        elif query_type == "my_records":
-            if not user:
-                return json.dumps({"message": "未登录"}, ensure_ascii=False)
-            profile = (
-                db.query(PatientProfile)
-                .filter(PatientProfile.user_id == user.id)
-                .first()
-            )
-            if not profile:
-                return json.dumps({"message": "未找到档案"}, ensure_ascii=False)
-            records = (
-                db.query(MedicalRecord)
-                .filter(MedicalRecord.patient_profile_id == profile.id)
-                .order_by(MedicalRecord.visit_date.desc().nullslast())
-                .all()
-            )
-            items = [
-                {
-                    "type": r.record_type,
-                    "date": str(r.visit_date) if r.visit_date else "",
-                    "chief": r.chief_complaint or "",
-                    "status": r.record_status,
-                }
-                for r in records
-            ]
-            return json.dumps(
-                {"records": items, "count": len(items)}, ensure_ascii=False
-            )
-        else:
-            return json.dumps(
-                {"error": f"未知查询类型: {query_type}"}, ensure_ascii=False
-            )
-    finally:
-        db.close()
-
-
-@tool
-def generate_report(task_id: int = 0) -> str:
-    """
-    为指定检测任务生成诊断报告。如不指定 task_id，使用最近一次检测结果。
-    报告包含：患者信息、检测结果、AI分析意见、风险评级、建议。
-
-    Args:
-        task_id: 检测任务ID（可选，默认使用最近一次）
-
-    Returns:
-        结构化诊断报告（Markdown格式）
-    """
-    from app.database.session import SessionLocal
-    from app.entity.db_models import DetectionTask, PatientProfile
-
-    db = SessionLocal()
-    try:
-        if task_id > 0:
-            task = db.query(DetectionTask).filter(DetectionTask.id == task_id).first()
-        else:
-            # 用 DetectionAgent._last_result 对应的任务，或最近一次
-            task = (
-                db.query(DetectionTask)
-                .filter(DetectionTask.status == "completed")
-                .order_by(DetectionTask.created_at.desc())
-                .first()
-            )
-
-        if not task:
-            return json.dumps(
-                {"error": "未找到检测记录，请先进行检测"}, ensure_ascii=False
-            )
-
-        # 查患者信息
-        patient_info = ""
-        if task.patient_profile_id:
-            profile = (
-                db.query(PatientProfile)
-                .filter(PatientProfile.id == task.patient_profile_id)
-                .first()
-            )
-            if profile:
-                patient_info = (
-                    f"- 患者编号: {profile.patient_code}\n"
-                    f"- 性别: {profile.gender or '未知'}  年龄: {profile.age or '未知'}\n"
-                    f"- 科室: {profile.department or '未知'}\n"
-                )
-
-        # 病灶列表
-        lesion_list = ""
-        for r in task.results:
-            cn = r.class_name_cn or r.class_name
-            lesion_list += f"| {cn} | {r.confidence:.0%} | {r.bbox} |\n"
-
-        report = f"""# 胸部X光影像诊断报告
-
-## 基本信息
-- 报告时间: {task.completed_at or task.created_at}
-- 检测类型: {task.task_type}
-{patient_info}
-
-## 检测结果
-- 检出病灶总数: {task.total_objects}
-- 推理耗时: {task.total_inference_time:.0f}ms
-
-| 病灶类型 | 置信度 | 位置坐标 |
-|----------|--------|----------|
-{lesion_list}
-
-## AI 综合分析
-{task.analysis_report or "暂无AI分析"}
-
-## 风险评级
-**{task.risk_level or "未评估"}**
-
-## 建议
-{task.analysis_suggestion or "请结合临床症状综合判断，必要时进一步检查。"}
----
-*本报告由 ChestVision AI 辅助生成，仅供医生参考，不作为最终诊断依据。*
-"""
-        return report
-    finally:
-        db.close()
-
-
-DETECTION_TOOLS = [
-    detect_single_image,
-    detect_batch_images,
-    detect_zip_file,
-    query_system_info,
-    generate_report,
-]
-
-
-# ══════════════════════════════════════════════════════════════
-# 二、创建 LLM 实例
-# ══════════════════════════════════════════════════════════════
 
 
 def create_llm():
@@ -413,28 +50,45 @@ def create_llm():
         base_url = getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1")
         model_name = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
 
+    http_client = httpx.Client(proxy=None, timeout=60.0)
+    async_http_client = httpx.AsyncClient(proxy=None, timeout=60.0)
+
     return ChatOpenAI(
         model=model_name,
         api_key=api_key,  # type: ignore[arg-type]
         base_url=base_url,
         temperature=0.1,
+        http_client=http_client,
+        http_async_client=async_http_client,
     )
 
 
 # ══════════════════════════════════════════════════════════════
-# 三、创建 ReAct Agent
+# DetectionAgent 类（Day 11 升级版）
 # ══════════════════════════════════════════════════════════════
 
 
 class DetectionAgent:
-    """胸片检测智能体（懒加载 LLM）"""
+    """胸片检测智能体（Day 11 升级版）
 
-    _last_result: Optional[dict] = None  # 存储最近一次检测完整结果（含 base64）
-    _current_user = None  # v3.0：当前请求用户，供工具函数权限控制
+    升级要点：
+      - 外置 Prompt 模板（prompts.py）
+      - 工具拆分到独立模块（tools/）
+      - 增强 SSE 事件协议（thinking/tool_start/tool_end/done）
+      - 集成对话记忆（Redis缓存层）
+      - 绑定 7+ 工具（检测3 + 系统2 + 知识库1+）
+    """
 
     def __init__(self):
         self.llm = None
         self.executor = None
+        # 合并所有工具
+        self.all_tools = DETECTION_TOOLS + SYSTEM_TOOLS + KNOWLEDGE_TOOLS
+        logger.info(
+            "DetectionAgent 工具清单: 检测%d + 系统%d + 知识%d = 共%d个",
+            len(DETECTION_TOOLS), len(SYSTEM_TOOLS),
+            len(KNOWLEDGE_TOOLS), len(self.all_tools),
+        )
 
     def _ensure_initialized(self):
         """延迟初始化 LLM 和 AgentExecutor"""
@@ -445,8 +99,7 @@ class DetectionAgent:
         if qwen_key and qwen_key not in ("sk-your-qwen-api-key", ""):
             api_key = qwen_key
             base_url = getattr(
-                settings,
-                "QWEN_BASE_URL",
+                settings, "QWEN_BASE_URL",
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
             model = getattr(settings, "QWEN_MODEL", "qwen-plus")
@@ -455,11 +108,7 @@ class DetectionAgent:
             base_url = getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1")
             model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
 
-        if not api_key or api_key in (
-            "sk-your-api-key-here",
-            "sk-your-qwen-api-key",
-            "",
-        ):
+        if not api_key or api_key in ("sk-your-api-key-here", "sk-your-qwen-api-key", ""):
             raise ValueError(
                 "未配置有效的 LLM API Key。请在 .env 中设置 QWEN_API_KEY。"
                 "快捷按钮通道不需要 LLM，仍可正常使用。"
@@ -470,40 +119,32 @@ class DetectionAgent:
             api_key=api_key,  # type: ignore[arg-type]
             base_url=base_url,
             temperature=0.1,
+            http_client=httpx.Client(proxy=None, timeout=60.0),
+            http_async_client=httpx.AsyncClient(proxy=None, timeout=60.0),
         )
 
-        system_prompt = """你是一个专业的胸部X光影像AI辅助诊断助手。支持的10种胸部病变：肺不张、钙化、实变、积液、肺气肿、纤维化、骨折、肿块、结节、气胸。
-
-重要规则：
-- 只有当用户消息中明确包含 [附件图片路径: xxx] 时才调用检测工具
-- 绝对不要自己编造或猜测图片路径
-- 如用户要求查看病例、统计等，使用 query_system_info 工具
-- 如用户要求生成报告，调用 generate_report 工具后直接把返回的报告内容完整展示给用户，不要总结或概括
-- 用中文回复。"""
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_prompt),
-                MessagesPlaceholder(variable_name="chat_history", optional=True),
-                ("human", "{input}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad"),
-            ]
-        )
+        # 使用外置 Prompt 模板
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", CHESTX_AGENT_SYSTEM_PROMPT),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ])
 
         agent = create_openai_tools_agent(
-            llm=self.llm, tools=DETECTION_TOOLS, prompt=prompt
+            llm=self.llm, tools=self.all_tools, prompt=prompt
         )
         self.executor = AgentExecutor(
             agent=agent,
-            tools=DETECTION_TOOLS,
+            tools=self.all_tools,
             verbose=True,
-            max_iterations=5,
+            max_iterations=8,  # 工具增多，适当提高迭代上限
             return_intermediate_steps=True,
         )
-        logger.info("DetectionAgent 初始化完成")
+        logger.info("DetectionAgent (Day11) 初始化完成: model=%s, tools=%d", model, len(self.all_tools))
 
     async def chat(self, message: str, image_path: Optional[str] = None) -> dict:
-        """处理用户对话消息"""
+        """非流式对话（兼容旧接口）"""
         self._ensure_initialized()
         assert self.executor is not None
         if image_path:
@@ -523,53 +164,99 @@ class DetectionAgent:
         message: str,
         image_path: Optional[str] = None,
         chat_history: Optional[list] = None,
+        user_id: int = 0,
+        session_id: str = "default",
     ) -> AsyncGenerator:
-        """流式处理对话消息（用于 SSE）
+        """流式处理对话消息（增强 SSE 协议）
+
+        SSE 事件类型：
+          - thinking:    Agent 正在思考
+          - tool_start:  开始调用工具
+          - tool_end:    工具调用完成
+          - text_chunk:  LLM 回复文本片段
+          - done:        对话完成
+          - error:       出错
 
         Args:
             message: 用户消息
             image_path: 附件图片路径
-            chat_history: 历史消息列表 [HumanMessage, AIMessage, ...]
+            chat_history: 历史消息列表（DB持久化层传入）
+            user_id: 用户ID（用于Redis缓存记忆）
+            session_id: 会话ID
         """
         self._ensure_initialized()
         assert self.executor is not None
         if image_path:
             message = f"{message}\n[附件图片路径: {image_path}]"
 
+        # ── Step 1: 发送 thinking 事件 ──
+        yield {"type": "thinking", "content": "正在分析您的请求..."}
+
+        # ── Step 2: 准备 Agent 输入 ──
         invoke_input = {"input": message}
         if chat_history:
             invoke_input["chat_history"] = chat_history
 
+        full_text = ""
+
         try:
             async for event in self.executor.astream_events(invoke_input, version="v2"):
                 kind = event["event"]
+
                 if kind == "on_chat_model_stream":
-                    chunk = event["data"].get("chunk")  # type: ignore[typeddict-unknown-key]
+                    chunk = event["data"].get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
+                        full_text += chunk.content
                         yield {"type": "text_chunk", "content": chunk.content}
+
                 elif kind == "on_tool_start":
+                    tool_name = event["name"]
+                    tool_input = event["data"].get("input", {})
+                    logger.info("工具调用开始: %s", tool_name)
                     yield {
-                        "type": "tool_call",
-                        "tool": event["name"],
-                        "input": event["data"].get("input", {}),
+                        "type": "tool_start",
+                        "tool": tool_name,
+                        "input": {k: str(v)[:100] for k, v in tool_input.items()},
                     }
+
                 elif kind == "on_tool_end":
-                    tool_data = event.get("data", {})
+                    tool_name = event.get("name", "")
+                    tool_output = str(event.get("data", {}).get("output", ""))
+                    summary = tool_output[:100] if tool_output else ""
+                    logger.info("工具调用完成: %s", tool_name)
                     yield {
-                        "type": "tool_result",
-                        "tool": event.get("name", ""),
-                        "result": str(tool_data.get("output", "")),
+                        "type": "tool_end",
+                        "tool": tool_name,
+                        "summary": summary,
+                        "result": tool_output,
                     }
+
                     # 如果有完整检测结果（含 base64 图），单独发给前端
-                    if DetectionAgent._last_result:
+                    last_result = get_last_result()
+                    if last_result:
                         yield {
                             "type": "detection_card",
-                            "data": DetectionAgent._last_result,
+                            "data": last_result,
                         }
-                        DetectionAgent._last_result = None
+                        clear_last_result()
+
         except Exception as e:
             logger.error("Agent 流式异常: %s", str(e), exc_info=True)
             yield {"type": "error", "content": "处理失败，请稍后重试"}
 
+        # ── Step 3: 缓存 AI 回复到 Redis 记忆 ──
+        if full_text and user_id:
+            try:
+                conversation_memory.save_message(user_id, session_id, "ai", full_text)
+            except Exception as e:
+                logger.warning("Redis缓存AI回复失败: %s", str(e))
 
+        # ── Step 4: 发送 done 事件 ──
+        yield {
+            "type": "done",
+            "full_text": full_text,
+        }
+
+
+# 全局单例
 detection_agent = DetectionAgent()

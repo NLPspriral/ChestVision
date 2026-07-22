@@ -2,7 +2,7 @@
 """
 真实阿里云 PAI-DLC SDK 测试程序。
 
-先填写下方全局变量，再把 CONFIRM_REAL_CLOUD_CALLS 改为 True，然后运行：
+先在 backend/.env 填写 PAI_*、ALIBABA_CLOUD_* 和可选 ACR_* 环境变量，再运行：
 
   python backend/tools/pai_dlc_real_test.py --case config-check
   # 含义：只检查本文件中的全局变量和环境变量是否填写完整，不访问 PAI-DLC。
@@ -38,7 +38,52 @@ import os
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
+
+
+def load_backend_env() -> None:
+    """Load backend/.env so the test script can use local runtime settings."""
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+        return
+    except Exception:
+        pass
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+load_backend_env()
 
 # ══════════════════════════════════════════════════════════════
 # 运行真实 PAI-DLC 测试前，请填写这些全局变量
@@ -48,7 +93,7 @@ from typing import Any
 # 获取方式：不需要从控制台获取，这是脚本自己的保护开关。
 # 使用方式：所有变量都填好，并且确认要访问真实 PAI-DLC 后，才改为 True。
 # 保持 False 时，除了 config-check 外的真实 PAI-DLC 操作都会被拦截。
-CONFIRM_REAL_CLOUD_CALLS = True
+CONFIRM_REAL_CLOUD_CALLS = env_bool("CONFIRM_REAL_CLOUD_CALLS", False)
 
 # 阿里云 AccessKey ID。
 # 获取方式：
@@ -59,14 +104,18 @@ CONFIRM_REAL_CLOUD_CALLS = True
 # 注意：
 #   不要使用主账号 AccessKey，不要把真实密钥提交到代码仓库。
 #   阿里云 Credentials SDK 默认读取环境变量；本脚本会把这里填写的值复制到环境变量。
-ALIYUN_ACCESS_KEY_ID = ""
+ALIYUN_ACCESS_KEY_ID = os.getenv("PAI_ACCESS_KEY_ID") or os.getenv(
+    "ALIBABA_CLOUD_ACCESS_KEY_ID", ""
+)
 
 # 与 ALIYUN_ACCESS_KEY_ID 配套的 AccessKey Secret。
 # 获取方式：
 #   创建 AccessKey 时只显示一次；如果忘记，只能重新创建新的 AccessKey，
 #   并禁用或删除旧 AccessKey。
 # 环境变量兜底：ALIBABA_CLOUD_ACCESS_KEY_SECRET。
-ALIYUN_ACCESS_KEY_SECRET = ""
+ALIYUN_ACCESS_KEY_SECRET = os.getenv("PAI_ACCESS_KEY_SECRET") or os.getenv(
+    "ALIBABA_CLOUD_ACCESS_KEY_SECRET", ""
+)
 
 # STS SecurityToken，可选。
 # 获取方式：
@@ -74,33 +123,35 @@ ALIYUN_ACCESS_KEY_SECRET = ""
 #   同时把返回的临时 AccessKeyId/AccessKeySecret 填到上面两个变量。
 # 使用长期 RAM 用户 AK 时留空。
 # 环境变量兜底：ALIBABA_CLOUD_SECURITY_TOKEN。
-ALIYUN_SECURITY_TOKEN = ""
+ALIYUN_SECURITY_TOKEN = os.getenv("PAI_SECURITY_TOKEN") or os.getenv(
+    "ALIBABA_CLOUD_SECURITY_TOKEN", ""
+)
 
 # PAI 工作空间和 DLC 资源所在地域 ID。
 # 获取方式：
 #   PAI 控制台左上角地域选择器，或工作空间详情页。
 # 示例：
 #   cn-hangzhou、cn-shanghai、cn-beijing、ap-southeast-1。
-PAI_REGION_ID = "cn-shanghai"
+PAI_REGION_ID = os.getenv("PAI_REGION_ID", "cn-shanghai")
 
 # PAI-DLC Endpoint。
 # 获取方式：
 #   通常是 pai-dlc.{region}.aliyuncs.com。
 #   一般留空即可，脚本会根据 PAI_REGION_ID 自动拼出 endpoint。
 #   只有使用特殊或私有 endpoint 时才手动填写。
-PAI_DLC_ENDPOINT = ""
+PAI_DLC_ENDPOINT = os.getenv("PAI_DLC_ENDPOINT", "")
 
 # PAI 工作空间 ID，查询任务和创建任务都需要。
 # 获取方式：
 #   PAI 控制台 -> 工作空间列表 -> 点击目标工作空间 -> 复制 Workspace ID。
 #   有些页面也会在工作空间信息卡片里显示该 ID。
-PAI_WORKSPACE_ID = ""
+PAI_WORKSPACE_ID = os.getenv("PAI_WORKSPACE_ID", "")
 
 # 资源配额 ID，可选。
 # 获取方式：
 #   PAI 控制台 -> AI 计算资源 / 资源配额 -> 复制目标通用计算资源或灵骏资源的配额 ID。
 # 使用公共后付费资源并填写 PAI_ECS_SPEC 时可以留空。
-PAI_RESOURCE_ID = ""
+PAI_RESOURCE_ID = os.getenv("PAI_RESOURCE_ID", "")
 
 # 创建任务时使用的镜像 URI。
 # 获取方式：
@@ -111,7 +162,7 @@ PAI_RESOURCE_ID = ""
 # 要求：
 #   PAI-DLC 必须能在 PAI_REGION_ID 所在地域拉取这个镜像。
 #   私有 ACR 镜像可能需要在控制台配置授权或账号密码。
-PAI_IMAGE_URI = ""
+PAI_IMAGE_URI = os.getenv("PAI_IMAGE_URI", "")
 
 # ACR 镜像仓库登录地址，可选。
 # 获取方式：
@@ -122,14 +173,14 @@ PAI_IMAGE_URI = ""
 #   只有私有仓库、或公开仓库的 VPC endpoint 仍要求认证时才需要填写。
 #   留空时，脚本会尝试从 PAI_IMAGE_URI 自动截取 registry 域名。
 # 环境变量兜底：ACR_DOCKER_REGISTRY。
-ACR_DOCKER_REGISTRY = ""
+ACR_DOCKER_REGISTRY = os.getenv("ACR_DOCKER_REGISTRY", "")
 
 # ACR 登录用户名，可选。
 # 获取方式：
 #   ACR 控制台 -> 访问凭证 -> 固定密码/临时密码对应的登录用户名。
 #   个人版通常是阿里云账号或 RAM 用户相关登录名，以控制台显示为准。
 # 环境变量兜底：ACR_USERNAME。
-ACR_USERNAME = ""
+ACR_USERNAME = os.getenv("ACR_USERNAME", "")
 
 # ACR 登录密码，可选。
 # 获取方式：
@@ -137,7 +188,7 @@ ACR_USERNAME = ""
 # 注意：
 #   不要提交真实密码；生产环境应使用环境变量或密钥管理。
 # 环境变量兜底：ACR_PASSWORD。
-ACR_PASSWORD = ""
+ACR_PASSWORD = os.getenv("ACR_PASSWORD", "")
 
 # 公共资源创建任务时使用的 ECS 规格。
 # 获取方式：
@@ -147,25 +198,25 @@ ACR_PASSWORD = ""
 #   3. 也可以从 DLC 创建任务控制台页面选择资源规格。
 # 如果 PAI_RESOURCE_ID 指向专有资源配额，并且你的 SDK payload 使用 ResourceConfig，
 # 这里可以留空。
-PAI_ECS_SPEC = "ecs.gn6v-c8g1.2xlarge"
+PAI_ECS_SPEC = os.getenv("PAI_ECS_SPEC", "ecs.gn6v-c8g1.2xlarge")
 
 # DLC 任务类型。
 # 选择方式：
 #   YOLO/PyTorch 训练测试使用 PyTorchJob。
 #   其他可用值取决于当前地域 PAI-DLC 支持情况，例如 TFJob、MPIJob、RayJob、CustomJob 等。
-PAI_JOB_TYPE = "PyTorchJob"
+PAI_JOB_TYPE = os.getenv("PAI_JOB_TYPE", "PyTorchJob")
 
 # Worker Pod 数量。
 # 选择方式：
 #   SDK 控制面冒烟测试用 1。
 #   多机任务需要额外设计分布式训练命令，并确认资源配额足够。
-PAI_POD_COUNT = 1
+PAI_POD_COUNT = env_int("PAI_POD_COUNT", 1)
 
 # 任务最大运行时间，单位分钟。
 # 选择方式：
 #   冒烟测试保持较低，避免任务失控产生费用。
 #   真实训练时再按需要调大。
-PAI_JOB_MAX_RUNNING_MINUTES = 30
+PAI_JOB_MAX_RUNNING_MINUTES = env_int("PAI_JOB_MAX_RUNNING_MINUTES", 30)
 
 # DLC 容器内执行的命令。
 # 选择方式：
@@ -505,7 +556,11 @@ def case_config_check() -> None:
     config = load_config()
     require_config(config, require_confirm=False)
     printable = {
-        k: ("***" if "access_key" in k or "secret" in k or "token" in k else v)
+        k: (
+            "***"
+            if "access_key" in k or "secret" in k or "token" in k or "password" in k
+            else v
+        )
         for k, v in config.items()
     }
     printable["confirm_real_cloud_calls"] = CONFIRM_REAL_CLOUD_CALLS

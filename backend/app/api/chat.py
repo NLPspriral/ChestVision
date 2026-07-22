@@ -185,7 +185,7 @@ async def chat_stream(
         full_response = ""  # 收集完整回复
         start_time = time.time()
 
-        # ── ④ 加载对话历史（实现多轮记忆）──
+        # ── ④ 加载对话历史（DB持久化层）──
         chat_history = []
         if session_id:
             try:
@@ -197,14 +197,29 @@ async def chat_stream(
             except Exception as e:
                 logger.warning("加载对话历史失败: %s", str(e))
 
+        # ── ⑤ Day11: 缓存用户消息到 Redis 记忆 ──
+        try:
+            from app.agent.memory import conversation_memory
+            conversation_memory.save_message(
+                current_user.id, str(db_session_id), "user", enhanced_message
+            )
+        except Exception as e:
+            logger.warning("Redis缓存用户消息失败: %s", str(e))
+
         try:
             from app.agent.detection_agent import DetectionAgent
 
             DetectionAgent._current_user = current_user
+            # Day11: 设置工具模块中的当前用户
+            from app.agent.tools.analysis_tool import set_current_user
+            set_current_user(current_user)
+
             async for event in detection_agent.chat_stream(
                 message=enhanced_message,
                 image_path=image_path,
                 chat_history=chat_history if chat_history else None,
+                user_id=current_user.id,
+                session_id=str(db_session_id),
             ):
                 event_data = json.dumps(event, ensure_ascii=False)
                 yield f"data: {event_data}\n\n"
@@ -364,3 +379,266 @@ async def archive_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在或无权操作")
     return {"message": "会话已归档", "session_id": session_id}
+
+
+# ══════════════════════════════════════════════════════════════
+# Multi-Agent 多智能体对话 API（Day 12 新增）
+# ══════════════════════════════════════════════════════════════
+
+
+@router.post("/multi-agent", summary="多智能体协作对话（LangGraph）")
+async def multi_agent_chat(
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """
+    多智能体协作对话接口 — 使用 LangGraph 编排多个专业 Agent
+
+    Agent 协作流程：
+      Supervisor（路由）→ Detection/Diagnosis/Report/QA → Summarize（汇总输出）
+
+    请求体：
+    {
+        "message": "帮我分析这张胸片",
+        "image_path": "/tmp/xxx.png",      // 可选，附件图片路径
+        "session_id": 123,                  // 可选，不传则自动创建
+        "patient_profile_id": 123           // 可选，指定患者上下文
+    }
+
+    响应：SSE 流式事件
+    """
+    body = await request.json()
+    message = body.get("message", "")
+    image_path = body.get("image_path")
+    session_id = body.get("session_id")
+    patient_profile_id = body.get("patient_profile_id")
+
+    if not message:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+
+    # ── 创建或获取会话 ──
+    try:
+        session = chat_service.get_or_create_session(
+            user_id=current_user.id,
+            session_id=session_id,
+        )
+        db_session_id = session.id
+        session_uuid = session.session_uuid
+    except Exception as e:
+        logger.error("创建/获取会话失败: %s", str(e))
+        raise HTTPException(status_code=500, detail="创建会话失败")
+
+    # ── 保存用户消息 ──
+    try:
+        chat_service.save_message(
+            session_id=db_session_id,
+            role="user",
+            content=message,
+        )
+    except Exception as e:
+        logger.warning("保存用户消息失败: %s", str(e))
+
+    # ── 注入患者病史上下文 ──
+    enhanced_message = message
+    try:
+        from app.database.session import SessionLocal
+        from app.entity.db_models import (
+            DetectionTask,
+            DoctorPatientRelation,
+            MedicalRecord,
+            PatientProfile,
+        )
+
+        db = SessionLocal()
+        try:
+            profile = None
+            if patient_profile_id and current_user.user_type != "patient":
+                profile = (
+                    db.query(PatientProfile)
+                    .filter(PatientProfile.id == patient_profile_id)
+                    .first()
+                )
+                if profile and current_user.user_type == "doctor":
+                    rel = (
+                        db.query(DoctorPatientRelation)
+                        .filter(
+                            DoctorPatientRelation.doctor_id == current_user.id,
+                            DoctorPatientRelation.patient_id == profile.user_id,
+                            DoctorPatientRelation.relation_status == "active",
+                        )
+                        .first()
+                    )
+                    if not rel:
+                        profile = None
+            elif current_user.user_type == "patient":
+                profile = (
+                    db.query(PatientProfile)
+                    .filter(PatientProfile.user_id == current_user.id)
+                    .first()
+                )
+
+            if profile:
+                records = (
+                    db.query(MedicalRecord)
+                    .filter(MedicalRecord.patient_profile_id == profile.id)
+                    .order_by(MedicalRecord.visit_date.desc().nullslast())
+                    .limit(5)
+                    .all()
+                )
+                tasks = (
+                    db.query(DetectionTask)
+                    .filter(
+                        DetectionTask.patient_profile_id == profile.id,
+                        DetectionTask.status == "completed",
+                    )
+                    .order_by(DetectionTask.created_at.desc())
+                    .limit(5)
+                    .all()
+                )
+
+                if records or tasks:
+                    ctx_parts = [
+                        f"[系统上下文：以下是患者 {profile.patient_code} 的历史信息]\n"
+                    ]
+                    if records:
+                        ctx_parts.append("## 历史病例")
+                        for r in records:
+                            ctx_parts.append(
+                                f"- {r.record_type} ({r.visit_date}): "
+                                f"主诉={r.chief_complaint or '无'}, "
+                                f"诊断={r.diagnosis or '无'}"
+                            )
+                    if tasks:
+                        ctx_parts.append("\n## 历史检测结果")
+                        for t in tasks:
+                            ctx_parts.append(
+                                f"- 检测ID={t.id} ({t.created_at}): "
+                                f"检出{t.total_objects}个病灶, "
+                                f"风险={t.risk_level or '未评估'}"
+                            )
+                    enhanced_message = "\n".join(ctx_parts) + "\n\n" + message
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("注入病史上下文失败: %s", str(e))
+
+    # ── 如果有图片路径注入到消息中 ──
+    if image_path:
+        enhanced_message = f"{enhanced_message}\n[附件图片路径: {image_path}]"
+
+    logger.info(
+        "Multi-Agent 对话: user=%s, session=%d, msg=%s",
+        current_user.username, db_session_id, enhanced_message[:80],
+    )
+
+    async def event_generator():
+        full_response = ""
+        start_time = time.time()
+
+        try:
+            from langchain_core.messages import AIMessage, HumanMessage
+
+            from app.agent.graph import build_agent_graph
+            from app.agent.memory import conversation_memory
+            from app.agent.state import MultiAgentState
+
+            # ── 加载对话历史 ──
+            chat_history = []
+            try:
+                history = conversation_memory.load_history(
+                    user_id=current_user.id, session_id=str(db_session_id)
+                )
+                for msg in history[-20:]:
+                    if msg.get("role") == "user":
+                        chat_history.append(HumanMessage(content=msg.get("content", "")))
+                    elif msg.get("role") == "ai":
+                        chat_history.append(AIMessage(content=msg.get("content", "")))
+                logger.info("Multi-Agent 加载 %d 条历史消息", len(chat_history))
+            except Exception as e:
+                logger.warning("Multi-Agent 加载历史失败: %s", str(e))
+
+            # ── 缓存用户消息 ──
+            try:
+                conversation_memory.save_message(
+                    current_user.id, str(db_session_id), "user", enhanced_message
+                )
+            except Exception as e:
+                logger.warning("缓存用户消息失败: %s", str(e))
+
+            # ── 构建初始状态 ──
+            initial_state: MultiAgentState = {
+                "messages": chat_history + [HumanMessage(content=enhanced_message)],
+                "next_agent": "",
+                "detection_result": {},
+                "diagnosis_result": {},
+                "report_result": "",
+                "qa_result": "",
+                "final_response": "",
+                "knowledge_sources": [],
+                "has_knowledge": False,
+                "user_id": current_user.id,
+                "session_id": str(db_session_id),
+                "patient_profile_id": patient_profile_id,
+                "image_path": image_path,
+                "task_id": None,
+                "error": None,
+            }
+
+            # ── 构建并运行 LangGraph ──
+            graph = build_agent_graph()
+            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Multi-Agent 协作分析中...'}, ensure_ascii=False)}\n\n"
+
+            async for event in graph.astream(initial_state, stream_mode="updates"):
+                for node_name, node_output in event.items():
+                    logger.info("Multi-Agent 节点完成: %s", node_name)
+
+                    # 发送节点状态事件
+                    yield f"data: {json.dumps({'type': 'agent_node', 'node': node_name, 'status': 'completed'}, ensure_ascii=False)}\n\n"
+
+                    # 如果是汇总节点，发送最终回复
+                    if node_name == "summarize" and node_output.get("final_response"):
+                        final_text = node_output["final_response"]
+                        knowledge_sources = node_output.get("knowledge_sources", [])
+                        has_knowledge = node_output.get("has_knowledge", False)
+
+                        # 发送 text_chunk
+                        yield f"data: {json.dumps({'type': 'text_chunk', 'content': final_text, 'knowledge_sources': knowledge_sources, 'has_knowledge': has_knowledge}, ensure_ascii=False)}\n\n"
+                        full_response = final_text
+
+            # ── 保存 AI 回复 ──
+            latency_ms = int((time.time() - start_time) * 1000)
+            if full_response.strip():
+                try:
+                    conversation_memory.save_message(
+                        current_user.id, str(db_session_id), "ai", full_response.strip()
+                    )
+                    chat_service.save_message(
+                        session_id=db_session_id,
+                        role="assistant",
+                        content=full_response.strip(),
+                        agent_used="multi-agent",
+                        latency_ms=latency_ms,
+                    )
+                except Exception as e:
+                    logger.warning("保存AI回复失败: %s", str(e))
+
+            # ── 发送完成事件 ──
+            yield f"data: {json.dumps({'type': 'done', 'session_id': db_session_id, 'session_uuid': session_uuid}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error("Multi-Agent 异常: %s", str(e), exc_info=True)
+            error_data = json.dumps(
+                {"type": "error", "content": f"Multi-Agent处理出错: {str(e)}"},
+                ensure_ascii=False,
+            )
+            yield f"data: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
