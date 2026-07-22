@@ -1,123 +1,160 @@
 ﻿<template>
   <div class="chat-page" :class="{ 'welcome-mode': !hasMessages }">
-    <!-- ═══════════════════════════════════════════════════
-         欢迎页：首次进入，无对话消息时显示
-         ═══════════════════════════════════════════════════ -->
-    <div v-if="!hasMessages" class="welcome-screen">
-      <div class="welcome-content">
-        <div class="welcome-logo">🫁</div>
-        <h1 class="welcome-greeting">你好，{{ userStore.username }}</h1>
-        <p class="welcome-tagline">开启智能医疗问答</p>
-        <p class="welcome-desc">
-          我是
-          <strong>ChestVision</strong>
-          智能影像分析平台，<br />基于深度学习辅助胸部 X 光影像诊断
-        </p>
-
-        <!-- 快捷提问 -->
-        <div class="welcome-suggestions">
-          <div
-            class="suggestion-item"
-            @click="sendSuggestion('帮我分析一张胸片')"
-          >
-            <span class="sug-icon">🔬</span>
-            <span>上传胸片进行 AI 分析</span>
-          </div>
-          <div
-            class="suggestion-item"
-            @click="sendSuggestion('胸部 X 光常见病变有哪些？')"
-          >
-            <span class="sug-icon">📚</span>
-            <span>了解胸部常见病变</span>
-          </div>
-          <div class="suggestion-item" @click="sendSuggestion('你能做什么？')">
-            <span class="sug-icon">✨</span>
-            <span>你能做什么</span>
-          </div>
+    <!-- 左侧：会话列表（始终可见） -->
+    <div :class="['chat-sessions-panel', { collapsed: !showSessions }]">
+      <div class="sessions-header">
+        <h3>对话记录</h3>
+        <el-button size="small" type="primary" @click="startNewChat"
+          >+ 新建对话</el-button
+        >
+      </div>
+      <div class="sessions-list" v-loading="agentStore.sessionsLoading">
+        <div
+          v-for="s in agentStore.sessions"
+          :key="s.id"
+          :class="[
+            'session-row',
+            { active: s.id === agentStore.currentSessionId },
+          ]"
+          @click="switchToSession(s.id)"
+        >
+          <div class="session-row-title">{{ s.title }}</div>
+          <div class="session-row-meta">{{ s.message_count }} 条消息</div>
         </div>
-
-        <!-- 输入区 -->
-        <div class="welcome-input-row">
-          <el-button
-            class="attach-btn"
-            @click="triggerFile"
-            :disabled="agentStore.isLoading"
-            circle
-            >＋</el-button
-          >
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept="image/*"
-            style="display: none"
-            @change="onFileSelect"
-          />
-          <el-input
-            v-model="inputText"
-            placeholder="输入您的问题，或上传胸片进行 AI 分析..."
-            size="large"
-            @keyup.enter.exact="sendMsg"
-            :disabled="agentStore.isLoading"
-            class="welcome-input"
-          >
-            <template #append>
-              <el-button
-                class="send-btn"
-                @click="sendMsg"
-                :loading="agentStore.isLoading"
-                type="primary"
-                >发送</el-button
-              >
-            </template>
-          </el-input>
+        <div
+          v-if="!agentStore.sessions.length && !agentStore.sessionsLoading"
+          class="sessions-empty"
+        >
+          暂无对话记录
         </div>
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════
-         正常对话模式：左侧会话列表 + 右侧聊天区
-         ═══════════════════════════════════════════════════ -->
-    <template v-else>
-      <!-- 左侧：会话列表 -->
-      <div :class="['chat-sessions-panel', { collapsed: !showSessions }]">
-        <div class="sessions-header">
-          <h3>对话记录</h3>
-          <el-button size="small" type="primary" @click="startNewChat"
-            >+ 新建对话</el-button
-          >
-        </div>
-        <div class="sessions-list" v-loading="agentStore.sessionsLoading">
-          <div
-            v-for="s in agentStore.sessions"
-            :key="s.id"
-            :class="[
-              'session-row',
-              { active: s.id === agentStore.currentSessionId },
-            ]"
-            @click="switchToSession(s.id)"
-          >
-            <div class="session-row-title">{{ s.title }}</div>
-            <div class="session-row-meta">{{ s.message_count }} 条消息</div>
+    <!-- 右侧主区域 -->
+    <div class="chat-main">
+      <!-- 折叠按钮 -->
+      <div
+        class="session-toggle-btn"
+        @click="showSessions = !showSessions"
+        :title="showSessions ? '收起对话列表' : '展开对话列表'"
+      >
+        <span>{{ showSessions ? "◀" : "▶" }}</span>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════
+           欢迎页：首次进入，无对话消息时显示
+           ═══════════════════════════════════════════════════ -->
+      <div v-if="!hasMessages" class="welcome-screen">
+        <div class="welcome-content">
+          <div class="welcome-logo">🫁</div>
+          <h1 class="welcome-greeting">你好，{{ userStore.username }}</h1>
+          <p class="welcome-tagline">开启智能医疗问答</p>
+          <p class="welcome-desc">
+            我是
+            <strong>ChestVision</strong>
+            智能影像分析平台，<br />基于深度学习辅助胸部 X 光影像诊断
+          </p>
+
+          <!-- 快捷提问 -->
+          <div class="welcome-suggestions">
+            <div
+              class="suggestion-item"
+              @click="sendSuggestion('帮我分析一张胸片')"
+            >
+              <span class="sug-icon">🔬</span>
+              <span>上传胸片进行 AI 分析</span>
+            </div>
+            <div
+              class="suggestion-item"
+              @click="sendSuggestion('胸部 X 光常见病变有哪些？')"
+            >
+              <span class="sug-icon">📚</span>
+              <span>了解胸部常见病变</span>
+            </div>
+            <div
+              class="suggestion-item"
+              @click="sendSuggestion('你能做什么？')"
+            >
+              <span class="sug-icon">✨</span>
+              <span>你能做什么</span>
+            </div>
           </div>
-          <div
-            v-if="!agentStore.sessions.length && !agentStore.sessionsLoading"
-            class="sessions-empty"
-          >
-            暂无对话记录
+
+          <!-- 快捷操作 -->
+          <div class="welcome-actions">
+            <el-select
+              v-if="
+                userStore.userType === 'doctor' ||
+                userStore.userType === 'admin'
+              "
+              v-model="selectedPatientId"
+              placeholder="选择患者（可选）"
+              clearable
+              size="default"
+              style="width: 200px"
+              @change="onPatientChange"
+            >
+              <el-option
+                v-for="p in patientList"
+                :key="p.id"
+                :label="`${p.patient_code} ${p.real_name || p.username}`"
+                :value="p.id"
+              />
+            </el-select>
+            <el-button
+              @click="quickDetect('single')"
+              :disabled="agentStore.isLoading"
+              >📷 单图检测</el-button
+            >
+            <el-button
+              @click="quickDetect('batch')"
+              :disabled="agentStore.isLoading"
+              >📁 批量检测</el-button
+            >
+          </div>
+
+          <!-- 输入区 -->
+          <div class="welcome-input-row">
+            <el-button
+              class="attach-btn"
+              @click="triggerFile"
+              :disabled="agentStore.isLoading"
+              circle
+              >＋</el-button
+            >
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="onFileSelect"
+            />
+            <el-input
+              v-model="inputText"
+              placeholder="输入您的问题，或上传胸片进行 AI 分析..."
+              size="large"
+              @keyup.enter.exact="sendMsg"
+              :disabled="agentStore.isLoading"
+              class="welcome-input"
+            >
+              <template #append>
+                <el-button
+                  class="send-btn"
+                  @click="sendMsg"
+                  :loading="agentStore.isLoading"
+                  type="primary"
+                  >发送</el-button
+                >
+              </template>
+            </el-input>
           </div>
         </div>
       </div>
 
-      <!-- 右侧：聊天区 -->
-      <div class="chat-main">
-        <!-- 折叠按钮 -->
-        <div
-          class="session-toggle-btn"
-          @click="showSessions = !showSessions"
-          :title="showSessions ? '收起对话列表' : '展开对话列表'"
-        >
-          <span>{{ showSessions ? "◀" : "▶" }}</span>
-        </div>
+      <!-- ═══════════════════════════════════════════════════
+           正常对话模式：消息列表 + 输入区
+           ═══════════════════════════════════════════════════ -->
+      <div v-else class="chat-body">
         <!-- 消息列表 -->
         <div class="chat-messages" ref="msgListRef">
           <div
@@ -320,7 +357,7 @@
           </div>
         </div>
       </div>
-    </template>
+    </div>
 
     <DoctorRecommendationDialog
       v-model="recommendationVisible"
@@ -821,8 +858,6 @@ async function handleDeleteSession(sessionId) {
   background: $bg-color;
 
   &.welcome-mode {
-    align-items: center;
-    justify-content: center;
     background:
       radial-gradient(
         ellipse 700px 500px at 10% 15%,
@@ -876,6 +911,7 @@ async function handleDeleteSession(sessionId) {
   justify-content: center;
   width: 100%;
   height: 100%;
+  min-height: 0;
   padding: 40px;
 }
 
@@ -972,6 +1008,16 @@ async function handleDeleteSession(sessionId) {
     font-size: 18px;
     flex-shrink: 0;
   }
+}
+
+/* ── 快捷操作按钮 ── */
+.welcome-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 /* ── 欢迎页输入区 ── */
@@ -1093,10 +1139,18 @@ async function handleDeleteSession(sessionId) {
   position: relative;
 }
 
+/* 对话主体：消息列表 + 输入框，继承 flex 列布局，输入框始终在底部 */
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .session-toggle-btn {
   position: absolute;
   top: 50%;
-  left: -14px;
+  left: 0;
   transform: translateY(-50%);
   z-index: 5;
   width: 28px;
