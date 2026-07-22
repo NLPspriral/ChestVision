@@ -182,6 +182,10 @@ class OssStorageGateway:
         except Exception:
             return False
 
+    def delete_object(self, key: str) -> None:
+        """Delete one OSS object by key."""
+        self.bucket.delete_object(key)
+
     def get_text(self, key: str) -> str:
         result = self.bucket.get_object(key)
         return result.read().decode("utf-8")

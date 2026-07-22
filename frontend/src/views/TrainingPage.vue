@@ -262,16 +262,17 @@
             style="display: flex; gap: 8px; align-items: center; width: 100%"
           >
             <el-select
-              v-model="trainForm.dataset_name"
+              v-model="trainForm.dataset_id"
               placeholder="选择数据集"
               style="flex: 1"
               @change="onDatasetChange"
             >
               <el-option
                 v-for="ds in datasetList"
-                :key="ds.name"
-                :label="`${ds.name} (训练${ds.train_count}张 + 验证${ds.val_count}张)`"
-                :value="ds.name"
+                :key="ds.upload_id"
+                :label="formatDatasetOption(ds)"
+                :value="ds.dataset_id"
+                :disabled="!isDatasetTrainable(ds)"
               />
             </el-select>
             <el-button @click="showUploadDataset = true" :icon="Upload"
@@ -282,9 +283,9 @@
             v-if="selectedDataset"
             style="margin-top: 6px; font-size: 12px; color: #909399"
           >
-            📊 {{ selectedDataset.train_count }} 训练 +
-            {{ selectedDataset.val_count }} 验证 =
-            {{ selectedDataset.total_count }} 张
+            OSS 数据集：{{ selectedDataset.dataset_name }} ·
+            {{ datasetStatusText(selectedDataset.status) }} ·
+            {{ formatBytes(selectedDataset.actual_size || selectedDataset.expected_size) }}
           </div>
         </el-form-item>
         <el-form-item label="检测场景">
@@ -378,16 +379,37 @@
             :limit="1"
             accept=".zip"
             :on-change="onUploadFileChange"
-            :file-list="[]"
+            :file-list="uploadFileList"
+            :on-remove="onUploadFileRemove"
           >
             <el-button type="primary">选择 ZIP 文件</el-button>
           </el-upload>
         </el-form-item>
       </el-form>
+      <div v-if="uploadProgress.visible" class="upload-progress">
+        <div class="upload-progress-title">
+          <span>分片 {{ uploadProgress.uploadedParts }}/{{ uploadProgress.totalParts }}</span>
+          <span>{{ uploadProgress.phaseText }}</span>
+        </div>
+        <el-progress
+          :percentage="Math.round(uploadProgress.percent)"
+          :status="uploadProgress.percent >= 100 ? 'success' : undefined"
+        />
+        <div class="upload-progress-meta">
+          <span>
+            {{ formatBytes(uploadProgress.uploadedBytes) }} /
+            {{ formatBytes(uploadProgress.totalBytes) }}
+          </span>
+          <span>速度 {{ formatSpeed(uploadProgress.speedBytesPerSecond) }}</span>
+          <span>预计剩余 {{ formatDuration(uploadProgress.remainingSeconds) }}</span>
+        </div>
+      </div>
       <template #footer>
-        <el-button @click="showUploadDataset = false">取消</el-button>
+        <el-button :disabled="uploading" @click="showUploadDataset = false">
+          取消
+        </el-button>
         <el-button type="primary" @click="doUploadDataset" :loading="uploading">
-          上传并准备数据集
+          分片上传到 OSS
         </el-button>
       </template>
     </el-dialog>
@@ -472,6 +494,7 @@
 </template>
 
 <script setup>
+import { uploadDataset } from "@/api/dataset";
 import request from "@/utils/request";
 import { Plus, Refresh, Upload } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
@@ -493,8 +516,10 @@ let pollTimer = null;
 const datasetList = ref([]);
 const showUploadDataset = ref(false);
 const uploadFile = ref(null);
+const uploadFileList = ref([]);
 const uploadDatasetName = ref("");
 const uploading = ref(false);
+const uploadProgress = ref(createUploadProgress());
 
 // 模型版本管理
 const modelVersions = ref([]);
@@ -502,8 +527,12 @@ const loadingVersions = ref(false);
 const settingDefault = ref(null);
 
 const selectedDataset = computed(() => {
-  return datasetList.value.find((d) => d.name === trainForm.value.dataset_name);
+  return datasetList.value.find((d) => d.dataset_id === trainForm.value.dataset_id);
 });
+
+const availableTrainingDatasets = computed(() =>
+  datasetList.value.filter((d) => ["UPLOADED", "READY"].includes(d.status)),
+);
 
 // 【Day 7 新增】模型操作状态
 const validating = ref(false);
@@ -518,7 +547,7 @@ let predictFile = null;
 
 const trainForm = ref({
   scene_id: null,
-  dataset_name: "chest_xray",
+  dataset_id: "",
   model_name: "yolo11n",
   epochs: 50,
   batch_size: 8,
@@ -788,14 +817,26 @@ function stopPolling() {
 }
 
 async function createTask() {
+  if (!trainForm.value.dataset_id) {
+    ElMessage.warning("请选择已上传完成的数据集");
+    return;
+  }
+  if (!selectedDataset.value || !isDatasetTrainable(selectedDataset.value)) {
+    ElMessage.warning("数据集尚未完成 OSS 服务端确认，暂不能启动训练");
+    return;
+  }
   creating.value = true;
   try {
     const payload = {
-      ...trainForm.value,
-      scene_name: trainForm.value.dataset_name, // 用数据集名作为场景名
+      dataset_id: trainForm.value.dataset_id,
+      model_name: trainForm.value.model_name,
+      epochs: trainForm.value.epochs,
+      img_size: trainForm.value.img_size,
+      batch_size: trainForm.value.batch_size,
+      optimizer: trainForm.value.optimizer,
+      lr0: trainForm.value.lr0,
     };
-    delete payload.dataset_name;
-    const res = await request.post("/training/start", payload);
+    const res = await request.post("/training/remote/start", payload);
     ElMessage.success(`训练任务已创建：${res.task_uuid}`);
     showCreateDialog.value = false;
     await fetchTasks();
@@ -813,16 +854,18 @@ async function createTask() {
 // ── 数据集管理 ──
 async function fetchDatasets() {
   try {
-    const res = await request.get("/training/datasets");
+    const res = await request.get("/training/remote/datasets");
     datasetList.value = res.datasets || [];
+    if (!trainForm.value.dataset_id && availableTrainingDatasets.value.length) {
+      trainForm.value.dataset_id = availableTrainingDatasets.value[0].dataset_id;
+    }
   } catch {
     /* ignore */
   }
 }
 
-function onDatasetChange(name) {
-  if (!name) return;
-  // 数据集名同时也是场景名，需确保 scene 存在
+function onDatasetChange(datasetId) {
+  if (!datasetId) return;
 }
 
 async function doUploadDataset() {
@@ -831,22 +874,24 @@ async function doUploadDataset() {
     return;
   }
   uploading.value = true;
+  uploadProgress.value = createUploadProgress(true);
   try {
-    const fd = new FormData();
-    fd.append("file", uploadFile.value);
-    fd.append("dataset_name", uploadDatasetName.value.trim());
-    await request.post("/training/datasets/upload", fd, {
-      headers: { "Content-Type": "multipart/form-data" },
-      timeout: 120000,
+    const datasetName = uploadDatasetName.value.trim();
+    const result = await uploadDataset({
+      datasetName,
+      file: uploadFile.value,
+      onProgress: updateUploadProgress,
     });
-    ElMessage.success("数据集上传成功");
+    ElMessage.success("数据集已上传到 OSS，等待服务端确认");
     showUploadDataset.value = false;
     uploadFile.value = null;
+    uploadFileList.value = [];
     uploadDatasetName.value = "";
     await fetchDatasets();
-    // 自动选中新上传的数据集
-    trainForm.value.dataset_name =
-      uploadDatasetName.value || trainForm.value.dataset_name;
+    const uploaded = result.upload;
+    if (uploaded?.dataset_id) {
+      trainForm.value.dataset_id = uploaded.dataset_id;
+    }
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || "上传失败");
   } finally {
@@ -856,6 +901,93 @@ async function doUploadDataset() {
 
 function onUploadFileChange(file) {
   uploadFile.value = file.raw;
+  uploadFileList.value = [file];
+  if (!uploadDatasetName.value && file.name) {
+    uploadDatasetName.value = file.name.replace(/\.zip$/i, "");
+  }
+}
+
+function onUploadFileRemove() {
+  uploadFile.value = null;
+  uploadFileList.value = [];
+  uploadProgress.value = createUploadProgress();
+}
+
+function createUploadProgress(visible = false) {
+  return {
+    visible,
+    phase: "idle",
+    phaseText: "等待上传",
+    uploadedParts: 0,
+    totalParts: 0,
+    uploadedBytes: 0,
+    totalBytes: uploadFile.value?.size || 0,
+    percent: 0,
+    speedBytesPerSecond: 0,
+    remainingSeconds: null,
+  };
+}
+
+function updateUploadProgress(progress) {
+  const phaseTextMap = {
+    signing: "签发分片 URL",
+    uploading: progress.currentPartNumber
+      ? `上传第 ${progress.currentPartNumber} 片`
+      : "上传中",
+    finalizing: "合并分片",
+    completed: "上传完成",
+  };
+  uploadProgress.value = {
+    visible: true,
+    ...progress,
+    phaseText: phaseTextMap[progress.phase] || "上传中",
+  };
+}
+
+function formatDatasetOption(dataset) {
+  const size = formatBytes(dataset.actual_size || dataset.expected_size);
+  return `${dataset.dataset_name} · ${datasetStatusText(dataset.status)} · ${size}`;
+}
+
+function isDatasetTrainable(dataset) {
+  return ["UPLOADED", "READY"].includes(dataset?.status);
+}
+
+function datasetStatusText(status) {
+  const map = {
+    INITIATED: "已创建",
+    UPLOADING: "上传中",
+    CLIENT_COMPLETED: "等待确认",
+    UPLOADED: "已上传",
+    READY: "可训练",
+    FAILED: "失败",
+    EXPIRED: "已过期",
+    CANCELLED: "已删除",
+  };
+  return map[status] || status || "-";
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (!size) return "0 MB";
+  if (size >= 1024 * 1024 * 1024) {
+    return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatSpeed(value) {
+  if (!value) return "-";
+  return `${formatBytes(value)}/s`;
+}
+
+function formatDuration(value) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  const seconds = Math.max(Math.ceil(value), 0);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
 }
 
 onMounted(() => {
@@ -1034,6 +1166,29 @@ onBeforeUnmount(() => {
   gap: 16px;
   font-size: 13px;
   color: #909399;
+}
+.upload-progress {
+  border-top: 1px solid #ebeef5;
+  margin-top: 8px;
+  padding-top: 14px;
+}
+.upload-progress-title,
+.upload-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.upload-progress-title {
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.upload-progress-meta {
+  color: #606266;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin-top: 8px;
 }
 .metric-cards {
   margin-bottom: 8px;

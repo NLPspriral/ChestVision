@@ -185,6 +185,44 @@ def _require_internal_callback_token(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="回调认证失败")
 
 
+def _can_manage_all_datasets(user) -> bool:
+    return bool(getattr(user, "is_superuser", False) or getattr(user, "user_type", "") == "admin")
+
+
+@router.get("/datasets", summary="查询 OSS 数据集列表")
+async def list_remote_datasets(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return {
+            "datasets": remote_training_service.list_dataset_uploads(
+                db=db,
+                user_id=current_user.id,
+                include_all=_can_manage_all_datasets(current_user),
+            )
+        }
+    except Exception as exc:
+        raise _handle_error(exc, "list_remote_datasets")
+
+
+@router.delete("/datasets/{dataset_ref}", summary="删除 OSS 数据集")
+async def delete_remote_dataset(
+    dataset_ref: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return remote_training_service.delete_dataset_upload(
+            db=db,
+            user_id=current_user.id,
+            dataset_ref=dataset_ref,
+            include_all=_can_manage_all_datasets(current_user),
+        )
+    except Exception as exc:
+        raise _handle_error(exc, "delete_remote_dataset")
+
+
 @router.post("/uploads", summary="创建远程数据集上传会话")
 async def create_dataset_upload(
     request: RemoteDatasetUploadCreate,

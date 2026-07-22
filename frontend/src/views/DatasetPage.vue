@@ -5,7 +5,7 @@
         <h2>数据集管理</h2>
         <div class="header-meta">
           <span>{{ datasetList.length }} 个数据集</span>
-          <span>{{ totalImages }} 张图片</span>
+          <span>{{ readyDatasets }} 个可训练</span>
         </div>
       </div>
       <div class="header-actions">
@@ -49,29 +49,26 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="140">
           <template #default="{ row }">
-            <el-tag :type="row.has_data ? 'success' : 'warning'" size="small">
-              {{ row.has_data ? "可训练" : "未就绪" }}
+            <el-tag :type="statusType(row.status)" size="small">
+              {{ statusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column
-          prop="train_count"
-          label="训练集"
-          width="110"
-          sortable
-        />
-        <el-table-column prop="val_count" label="验证集" width="110" sortable />
-        <el-table-column
-          prop="total_count"
-          label="总图片"
-          width="110"
-          sortable
-        />
-        <el-table-column label="路径" min-width="260" show-overflow-tooltip>
+        <el-table-column label="文件大小" width="130" sortable>
           <template #default="{ row }">
-            <span class="path-text">datasets/{{ row.name }}/yolo_dataset</span>
+            {{ formatBytes(row.actual_size || row.expected_size) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="OSS 对象" min-width="320" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="path-text">oss://{{ row.bucket }}/{{ row.raw_object_key }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.updated_at || row.created_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130" fixed="right">
@@ -120,10 +117,28 @@
           </el-upload>
         </el-form-item>
       </el-form>
+      <div v-if="uploadProgress.visible" class="upload-progress">
+        <div class="progress-title">
+          <span>分片 {{ uploadProgress.uploadedParts }}/{{ uploadProgress.totalParts }}</span>
+          <span>{{ uploadProgress.phaseText }}</span>
+        </div>
+        <el-progress
+          :percentage="Math.round(uploadProgress.percent)"
+          :status="uploadProgress.percent >= 100 ? 'success' : undefined"
+        />
+        <div class="progress-meta">
+          <span>
+            {{ formatBytes(uploadProgress.uploadedBytes) }} /
+            {{ formatBytes(uploadProgress.totalBytes) }}
+          </span>
+          <span>速度 {{ formatSpeed(uploadProgress.speedBytesPerSecond) }}</span>
+          <span>预计剩余 {{ formatDuration(uploadProgress.remainingSeconds) }}</span>
+        </div>
+      </div>
       <template #footer>
-        <el-button @click="showUploadDialog = false">取消</el-button>
+        <el-button :disabled="uploading" @click="showUploadDialog = false">取消</el-button>
         <el-button type="primary" :loading="uploading" @click="submitUpload">
-          上传
+          分片上传
         </el-button>
       </template>
     </el-dialog>
@@ -153,6 +168,7 @@ const uploadForm = ref({
 });
 const selectedFile = ref(null);
 const fileList = ref([]);
+const uploadProgress = ref(createUploadProgress());
 
 const filteredDatasets = computed(() => {
   const text = keyword.value.trim().toLowerCase();
@@ -162,8 +178,9 @@ const filteredDatasets = computed(() => {
   );
 });
 
-const totalImages = computed(() =>
-  datasetList.value.reduce((sum, item) => sum + (item.total_count || 0), 0),
+const readyDatasets = computed(() =>
+  datasetList.value.filter((item) => ["UPLOADED", "READY"].includes(item.status))
+    .length,
 );
 
 async function fetchDatasets() {
@@ -193,12 +210,15 @@ function onFileChange(file) {
 function onFileRemove() {
   selectedFile.value = null;
   fileList.value = [];
+  uploadProgress.value = createUploadProgress();
 }
 
 function resetUploadForm() {
+  if (uploading.value) return;
   uploadForm.value.datasetName = "";
   selectedFile.value = null;
   fileList.value = [];
+  uploadProgress.value = createUploadProgress();
 }
 
 async function submitUpload() {
@@ -213,10 +233,12 @@ async function submitUpload() {
   }
 
   uploading.value = true;
+  uploadProgress.value = createUploadProgress(true);
   try {
     await uploadDataset({
       datasetName,
       file: selectedFile.value,
+      onProgress: updateUploadProgress,
     });
     ElMessage.success("数据集上传成功");
     showUploadDialog.value = false;
@@ -239,7 +261,7 @@ async function confirmDelete(row) {
         cancelButtonText: "取消",
       },
     );
-    await deleteDataset(row.name);
+    await deleteDataset(row.upload_id || row.dataset_id || row.name);
     ElMessage.success("数据集已删除");
     await fetchDatasets();
   } catch (e) {
@@ -247,6 +269,86 @@ async function confirmDelete(row) {
       ElMessage.error(e.response?.data?.detail || "删除失败");
     }
   }
+}
+
+function createUploadProgress(visible = false) {
+  return {
+    visible,
+    phase: "idle",
+    phaseText: "等待上传",
+    uploadedParts: 0,
+    totalParts: 0,
+    uploadedBytes: 0,
+    totalBytes: selectedFile.value?.size || 0,
+    percent: 0,
+    speedBytesPerSecond: 0,
+    remainingSeconds: null,
+  };
+}
+
+function updateUploadProgress(progress) {
+  const phaseTextMap = {
+    signing: "签发分片 URL",
+    uploading: progress.currentPartNumber
+      ? `上传第 ${progress.currentPartNumber} 片`
+      : "上传中",
+    finalizing: "合并分片",
+    completed: "上传完成",
+  };
+  uploadProgress.value = {
+    visible: true,
+    ...progress,
+    phaseText: phaseTextMap[progress.phase] || "上传中",
+  };
+}
+
+function statusText(status) {
+  const map = {
+    INITIATED: "已创建",
+    UPLOADING: "上传中",
+    CLIENT_COMPLETED: "等待确认",
+    UPLOADED: "已上传",
+    READY: "可训练",
+    FAILED: "失败",
+    EXPIRED: "已过期",
+    CANCELLED: "已删除",
+  };
+  return map[status] || status || "-";
+}
+
+function statusType(status) {
+  if (["UPLOADED", "READY"].includes(status)) return "success";
+  if (["FAILED", "EXPIRED", "CANCELLED"].includes(status)) return "danger";
+  if (status === "CLIENT_COMPLETED") return "warning";
+  return "info";
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (!size) return "0 MB";
+  if (size >= 1024 * 1024 * 1024) {
+    return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatSpeed(value) {
+  if (!value) return "-";
+  return `${formatBytes(value)}/s`;
+}
+
+function formatDuration(value) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  const seconds = Math.max(Math.ceil(value), 0);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
 }
 
 onMounted(fetchDatasets);
@@ -319,6 +421,33 @@ onMounted(fetchDatasets);
   color: #909399;
   font-size: 32px;
   margin-bottom: 8px;
+}
+
+.upload-progress {
+  border-top: 1px solid #ebeef5;
+  margin-top: 8px;
+  padding-top: 14px;
+}
+
+.progress-title,
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-title {
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.progress-meta {
+  color: #606266;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 @media (max-width: 768px) {

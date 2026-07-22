@@ -173,6 +173,100 @@ class RemoteTrainingService:
             )
         return scene
 
+    def list_dataset_uploads(
+        self,
+        db: Session,
+        user_id: int,
+        include_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List dataset records managed by OSS, not local filesystem."""
+        query = db.query(DatasetUpload).filter(DatasetUpload.status != "CANCELLED")
+        if not include_all:
+            query = query.filter(DatasetUpload.user_id == user_id)
+        rows = (
+            query.order_by(DatasetUpload.updated_at.desc(), DatasetUpload.id.desc())
+            .all()
+        )
+        return [self.serialize_upload(row) for row in rows]
+
+    def delete_dataset_upload(
+        self,
+        db: Session,
+        user_id: int,
+        dataset_ref: str,
+        include_all: bool = False,
+    ) -> dict[str, Any]:
+        """Delete or cancel one OSS-managed dataset upload.
+
+        dataset_ref may be upload_uuid, dataset_uuid, or dataset_name. When a
+        name matches multiple rows, the latest row visible to the caller wins.
+        """
+        upload = self._get_upload_by_ref_for_user(
+            db=db,
+            user_id=user_id,
+            dataset_ref=dataset_ref,
+            include_all=include_all,
+        )
+        running_job = (
+            db.query(RemoteTrainingJob)
+            .join(TrainingTask, TrainingTask.id == RemoteTrainingJob.task_id)
+            .filter(
+                RemoteTrainingJob.dataset_upload_id == upload.id,
+                TrainingTask.status.in_(["pending", "running"]),
+            )
+            .first()
+        )
+        if running_job:
+            raise RemoteTrainingValidationError("数据集正在被远程训练任务使用，无法删除")
+
+        metadata = upload.object_metadata or {}
+        if (
+            metadata.get("upload_mode") == "multipart"
+            and metadata.get("multipart_upload_id")
+            and upload.status in {"INITIATED", "UPLOADING"}
+        ):
+            try:
+                self.storage.abort_multipart_upload(
+                    upload.raw_object_key,
+                    metadata["multipart_upload_id"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "取消 OSS multipart 上传失败: upload_uuid=%s error=%s",
+                    upload.upload_uuid,
+                    exc,
+                    exc_info=True,
+                )
+
+        deleted_keys: list[str] = []
+        for key in [upload.raw_object_key, upload.manifest_key, upload.success_key]:
+            if not key:
+                continue
+            try:
+                self.storage.delete_object(key)
+                deleted_keys.append(key)
+            except Exception as exc:
+                logger.error(
+                    "删除 OSS 数据集对象失败: upload_uuid=%s key=%s error=%s",
+                    upload.upload_uuid,
+                    key,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+
+        upload.status = "CANCELLED"
+        upload.error_message = None
+        upload.object_metadata = {
+            **metadata,
+            "deleted_at": _now().isoformat(),
+            "deleted_keys": deleted_keys,
+        }
+        upload.updated_at = _now()
+        db.commit()
+        db.refresh(upload)
+        return self.serialize_upload(upload)
+
     def initiate_dataset_upload(
         self,
         db: Session,
@@ -1173,6 +1267,30 @@ class RemoteTrainingService:
             raise RemoteTrainingValidationError("上传会话不存在")
         return upload
 
+    def _get_upload_by_ref_for_user(
+        self,
+        db: Session,
+        user_id: int,
+        dataset_ref: str,
+        include_all: bool = False,
+    ) -> DatasetUpload:
+        query = db.query(DatasetUpload).filter(
+            (
+                (DatasetUpload.upload_uuid == dataset_ref)
+                | (DatasetUpload.dataset_uuid == dataset_ref)
+                | (DatasetUpload.dataset_name == dataset_ref)
+            )
+        )
+        if not include_all:
+            query = query.filter(DatasetUpload.user_id == user_id)
+        upload = (
+            query.order_by(DatasetUpload.updated_at.desc(), DatasetUpload.id.desc())
+            .first()
+        )
+        if not upload:
+            raise RemoteTrainingValidationError("数据集不存在")
+        return upload
+
     def _get_task_and_remote_job(
         self, db: Session, task_id: int, user_id: int | None = None
     ) -> tuple[TrainingTask, RemoteTrainingJob]:
@@ -1194,20 +1312,31 @@ class RemoteTrainingService:
         return {
             "upload_id": upload.upload_uuid,
             "dataset_id": upload.dataset_uuid,
+            "name": upload.dataset_name,
             "dataset_name": upload.dataset_name,
             "status": upload.status,
+            "has_data": upload.status in {"UPLOADED", "READY"},
+            "storage_backend": "oss",
             "bucket": upload.bucket,
             "raw_object_key": upload.raw_object_key,
             "processed_prefix": upload.processed_prefix,
             "manifest_key": upload.manifest_key,
             "success_key": upload.success_key,
+            "original_filename": upload.original_filename,
+            "content_type": upload.content_type,
+            "expected_size": upload.expected_size,
             "actual_size": upload.actual_size,
             "etag": upload.etag,
             "error_message": upload.error_message,
+            "train_count": None,
+            "val_count": None,
+            "total_count": None,
             "client_completed_at": upload.client_completed_at,
             "server_verified_at": upload.server_verified_at,
             "expires_at": upload.expires_at,
             "ready_at": upload.ready_at,
+            "created_at": upload.created_at,
+            "updated_at": upload.updated_at,
         }
 
     def serialize_training(
