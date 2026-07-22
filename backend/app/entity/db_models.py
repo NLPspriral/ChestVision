@@ -87,6 +87,22 @@ class User(Base):
     )
 
 
+class EmailVerificationCode(Base):
+    """邮箱验证码审计表；仅保存 HMAC 哈希，不保存验证码明文。"""
+
+    __tablename__ = "email_verification_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(100), nullable=False, index=True)
+    purpose = Column(String(30), nullable=False, default="register", index=True)
+    code_hash = Column(String(64), nullable=False)
+    request_ip = Column(String(50), nullable=True, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+
 class Role(Base):
     """角色表"""
 
