@@ -36,6 +36,21 @@ router = APIRouter(prefix="/api/chat", tags=["智能对话"])
 UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "chestx_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+_ATTACHMENT_PATH_PATTERN = re.compile(
+    r"\[附件(?:图片|多张图片|视频|ZIP)路径:\s*.*?\]"
+)
+_SERVER_PATH_PATTERN = re.compile(
+    r"(?:(?:/tmp|/app|/var/tmp)/[^\s`，。；、）》）\]]+)"
+)
+
+
+def _sanitize_visible_message(content: str) -> str:
+    """历史接口不得向浏览器返回工具使用的服务器内部路径。"""
+    if not isinstance(content, str):
+        return content
+    content = _ATTACHMENT_PATH_PATTERN.sub("已上传胸片", content)
+    return _SERVER_PATH_PATTERN.sub("内部路径已隐藏", content)
+
 
 @router.post("/upload", summary="上传胸片文件")
 async def upload_image(
@@ -480,7 +495,7 @@ async def get_messages(
             {
                 "id": m.id,
                 "role": m.role,
-                "content": m.content,
+                "content": _sanitize_visible_message(m.content),
                 "agent_used": m.agent_used,
                 "tool_calls": m.tool_calls,
                 "tool_result": m.tool_result,
