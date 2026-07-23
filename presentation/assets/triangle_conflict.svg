@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 36px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #102a43; }
+      .sub { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #52606d; }
+      .tri { fill: #eef6ff; stroke: #64748b; stroke-width: 2.5; }
+      .sideDoctor { stroke: #4f46e5; stroke-width: 8; stroke-linecap: round; }
+      .sideLLM { stroke: #0f766e; stroke-width: 8; stroke-linecap: round; }
+      .sidePlatform { stroke: #c2410c; stroke-width: 8; stroke-linecap: round; }
+      .guide { stroke: #94a3b8; stroke-width: 2; fill: none; stroke-dasharray: 7 7; }
+      .node { stroke: #ffffff; stroke-width: 5; }
+      .nodeText { font: 700 30px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: white; }
+      .nodeSub { font: 500 15px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: white; }
+      .card { fill: #ffffff; stroke: #d9e2ec; stroke-width: 1.5; rx: 12; }
+      .cardTitle { font: 700 23px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #102a43; }
+      .body { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #334e68; }
+      .missing { font: 700 17px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #b91c1c; }
+      .small { font: 500 14px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #52606d; }
+      .center { fill: #ecfdf5; stroke: #34d399; stroke-width: 1.8; rx: 14; }
+      .centerTitle { font: 700 28px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #102a43; }
+      .centerText { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; fill: #334e68; }
+      .accent1 { fill: #4f46e5; }
+      .accent2 { fill: #0f766e; }
+      .accent3 { fill: #c2410c; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1280" height="720"/>
+  <text class="title" x="56" y="64">立项必要性：医疗服务中的三角矛盾</text>
+  <text class="sub" x="58" y="96">三个现有方案通常只能覆盖两项能力，都会缺少第三项关键体验</text>
+
+  <polygon class="tri" points="640,142 300,548 980,548"/>
+  <line class="sidePlatform" x1="640" y1="142" x2="300" y2="548"/>
+  <line class="sideLLM" x1="300" y1="548" x2="980" y2="548"/>
+  <line class="sideDoctor" x1="640" y1="142" x2="980" y2="548"/>
+
+  <circle class="node accent1" cx="640" cy="142" r="78"/>
+  <text class="nodeText" x="595" y="133">专业性</text>
+  <text class="nodeSub" x="587" y="164">医学判断可信</text>
+
+  <circle class="node accent2" cx="300" cy="548" r="78"/>
+  <text class="nodeText" x="240" y="539">随时响应</text>
+  <text class="nodeSub" x="254" y="570">24h 待命</text>
+
+  <circle class="node accent3" cx="980" cy="548" r="78"/>
+  <text class="nodeText" x="920" y="539">易理解性</text>
+  <text class="nodeSub" x="924" y="570">患者能看懂</text>
+
+  <rect class="card" x="88" y="276" width="310" height="134"/>
+  <text class="cardTitle" x="118" y="315">医学分析平台</text>
+  <text class="body" x="118" y="350">具备：专业性 + 随时响应</text>
+  <text class="missing" x="118" y="381">缺少：易理解性</text>
+  <text class="small" x="118" y="403">可 24h 处理、结论专业，但交互弱</text>
+
+  <rect class="card" x="882" y="276" width="310" height="134"/>
+  <text class="cardTitle" x="912" y="315">医生诊断</text>
+  <text class="body" x="912" y="350">具备：专业性 + 易理解性</text>
+  <text class="missing" x="912" y="381">缺少：随时响应</text>
+  <text class="small" x="912" y="403">判断可信、能解释，但难以随时在线</text>
+
+  <rect class="card" x="465" y="590" width="350" height="96"/>
+  <text class="cardTitle" x="496" y="624">大模型问答</text>
+  <text class="body" x="496" y="653">具备：随时响应 + 易理解性</text>
+  <text class="missing" x="496" y="678">缺少：专业性</text>
+
+  <line class="guide" x1="468" y1="346" x2="398" y2="346"/>
+  <line class="guide" x1="812" y1="346" x2="882" y2="346"/>
+  <line class="guide" x1="640" y1="548" x2="640" y2="590"/>
+
+  <rect class="center" x="452" y="310" width="376" height="128"/>
+  <text class="centerTitle" x="519" y="354">ChestVision 目标</text>
+  <text class="centerText" x="492" y="389">胸片先结构化，结果再解释</text>
+  <text class="centerText" x="492" y="418">必要时把信息接力给医生</text>
+</svg>
