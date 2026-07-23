@@ -51,6 +51,7 @@ Xtest_data/
 Xtrain-old/
 # ── 文档/子项目（独立 Git 仓库）──────────────────────
 XJTU-fxhd/
+/presentation
 _.gitignore
 # ── 运行时生成的文件 ────────────────────────────────
 backend/storage/
